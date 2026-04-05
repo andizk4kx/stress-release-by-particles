@@ -38,14 +38,43 @@ EffectType currentEffect = EFFECT_ATTRACT;
 
 bool justReset = false;
 
-void ResetParticles()
-{
-    if (particles == NULL) return;
+const float half = 0.5f;
+const float invSix = 0.16666667f;
+const float inv10000 = 0.0001f;
 
-    for (int i = 0; i < MAX_PARTICLES; i++)
-    {
-        particles[i].position = (Vector2){ (float)GetRandomValue(0, screenWidth), (float)GetRandomValue(0, screenHeight) };
-        particles[i].velocity = (Vector2){ (float)GetRandomValue(-10, 10) / 10.0f, (float)GetRandomValue(-10, 10) / 10.0f };
+Vector2 previousEffectPosition;
+
+// Use Gaussian Calculation to make the particles spread from the center
+float GetGaussianRandom(float mean, float stdDev) {
+    float u1 = (float)GetRandomValue(1, 10000) * inv10000;
+    float u2 = (float)GetRandomValue(1, 10000) * inv10000;
+    
+    // Box-Muller transform
+    float r = sqrtf(-2.0f*logf(u1));
+    float theta = 2.0f*PI*u2;
+    
+    return (r*cosf(theta))*stdDev + mean;
+}
+
+void ResetParticles() {
+    if (particles == NULL) return;
+    
+    float centerX = screenWidth*half;
+    float centerY = screenHeight*half;
+    float spreadX = screenWidth*invSix;
+    float spreadY = screenHeight*invSix;
+
+    for (int i = 0; i < MAX_PARTICLES; i++) {
+        particles[i].position.x = GetGaussianRandom(centerX, spreadX);
+        particles[i].position.y = GetGaussianRandom(centerY, spreadY);
+        
+        // 1.0f / 10.0f = 0.1f
+        particles[i].velocity = (Vector2){ 
+            (float)GetRandomValue(-5, 5)*0.1f, 
+            (float)GetRandomValue(-5, 5)*0.1f 
+        };
+        
+        // make it blueish
         particles[i].color = (Color){ GetRandomValue(100, 255), GetRandomValue(100, 255), 255, 255 };
     }
 }
@@ -94,6 +123,7 @@ void UpdateDrawFrame(void)
 
     Vector2 mousePos = GetMousePosition();
     float effectSize = (float)screenHeight*0.1f;
+    float effectStrength = (float)screenHeight*0.002f;
 
     // --- INPUT LOGIC ---
     int currentGesture = GetGestureDetected();
@@ -130,29 +160,50 @@ void UpdateDrawFrame(void)
     {
         justReset = false;
     }
-    if (!justReset) {
+   if (!justReset) {
+        bool isClicking = IsMouseButtonDown(MOUSE_LEFT_BUTTON);
+        Vector2 mouseDelta = Vector2Subtract(mousePos, previousEffectPosition);
+        float segmentLengthSq = Vector2LengthSqr(mouseDelta);
 
         // --- UPDATE LOGIC ---
         for (int i = 0; i < MAX_PARTICLES; i++) {
-            float dist = Vector2Distance(particles[i].position, mousePos);
+            
+            if (isClicking) {
+                Vector2 targetPos;
 
-            if (dist < effectSize && IsMouseButtonDown(MOUSE_LEFT_BUTTON)) {
-                Vector2 dir = Vector2Normalize(Vector2Subtract(mousePos, particles[i].position));
+                if (segmentLengthSq < 0.0001f) {
+                    targetPos = mousePos;
+                } else {
 
-                // Calculate how strong the push/pull should be based on distance
-                float forceMultiplier = EFFECT_STRENGTH * (1.0f - (dist / effectSize));
+                    Vector2 toParticle = Vector2Subtract(particles[i].position, previousEffectPosition);
+                    float t = Vector2DotProduct(toParticle, mouseDelta) / segmentLengthSq;
+                    if (t < 0.0f) t = 0.0f;
+                    if (t > 1.0f) t = 1.0f;
 
-                // Apply the force based on the current active state
-                if (currentEffect == EFFECT_ATTRACT) {
-                    particles[i].velocity.x += dir.x * forceMultiplier;
-                    particles[i].velocity.y += dir.y * forceMultiplier;
-                } else if (currentEffect == EFFECT_REPEL) {
-                    particles[i].velocity.x -= dir.x * forceMultiplier; // Subtract to push away
-                    particles[i].velocity.y -= dir.y * forceMultiplier;
+                    targetPos = (Vector2){ 
+                        previousEffectPosition.x + t * mouseDelta.x, 
+                        previousEffectPosition.y + t * mouseDelta.y 
+                    };
+                }
+
+                float dist = Vector2Distance(particles[i].position, targetPos);
+
+                if (dist < effectSize) {
+                    
+                    Vector2 dir = Vector2Normalize(Vector2Subtract(targetPos, particles[i].position));
+                    float forceMultiplier = effectStrength*(1.0f - (dist/effectSize));
+
+                    if (currentEffect == EFFECT_ATTRACT) {
+                        particles[i].velocity.x += dir.x * forceMultiplier;
+                        particles[i].velocity.y += dir.y * forceMultiplier;
+                    } else if (currentEffect == EFFECT_REPEL) {
+                        particles[i].velocity.x -= dir.x * forceMultiplier;
+                        particles[i].velocity.y -= dir.y * forceMultiplier;
+                    }
                 }
             }
 
-            // Apply friction/damping so they don't fly off forever
+            // Apply friction/damping
             particles[i].velocity.x *= 0.95f;
             particles[i].velocity.y *= 0.95f;
 
@@ -161,12 +212,13 @@ void UpdateDrawFrame(void)
             particles[i].position.y += particles[i].velocity.y;
 
             // Wrap around screen edges
-            if (particles[i].position.x < 0) particles[i].position.x = (float) screenWidth;
-            if (particles[i].position.x > (float) screenWidth) particles[i].position.x = 0;
-            if (particles[i].position.y < 0) particles[i].position.y = (float) screenHeight;
-            if (particles[i].position.y > (float) screenHeight) particles[i].position.y = 0;
+            if (particles[i].position.x < 0) particles[i].position.x = (float)screenWidth;
+            if (particles[i].position.x > (float)screenWidth) particles[i].position.x = 0;
+            if (particles[i].position.y < 0) particles[i].position.y = (float)screenHeight;
+            if (particles[i].position.y > (float)screenHeight) particles[i].position.y = 0;
         }
     }
+    previousEffectPosition = mousePos;
 
     // --- DRAW LOGIC ---
     BeginDrawing();
