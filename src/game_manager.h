@@ -44,6 +44,8 @@ const float inv10000 = 0.0001f;
 
 Vector2 previousEffectPosition = {0};
 
+bool isUsingTouch = false;
+
 // Use Gaussian Calculation to make the particles spread from the center
 float GetGaussianRandom(float mean, float stdDev) {
     float u1 = (float)GetRandomValue(1, 10000) * inv10000;
@@ -136,8 +138,8 @@ void UpdateDrawFrame(void)
     // Reset: 'R' Key, Middle Click (PC) OR 2-finger Tap (Touch)
     bool resetRequested = IsKeyPressed(KEY_R) ||
                           IsMouseButtonPressed(MOUSE_MIDDLE_BUTTON) ||
-                          activeFingers >= 2;
-
+                          activeFingers >= 3;
+    if (!isUsingTouch && activeFingers > 0) isUsingTouch = true;
     // Process inputs
     if (resetRequested)
     {
@@ -162,7 +164,11 @@ void UpdateDrawFrame(void)
     }
    if (!justReset) {
         bool isClicking = IsMouseButtonDown(MOUSE_LEFT_BUTTON);
-        Vector2 mouseDelta = Vector2Subtract(mousePos, previousEffectPosition);
+        Vector2 mouseDelta = Vector2Zero();
+        if (currentGesture != GESTURE_TAP)
+        {
+            mouseDelta = Vector2Subtract(mousePos, previousEffectPosition);
+        }
         float segmentLengthSq = Vector2LengthSqr(mouseDelta);
 
         // --- UPDATE LOGIC ---
