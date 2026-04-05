@@ -42,7 +42,7 @@ const float half = 0.5f;
 const float invSix = 0.16666667f;
 const float inv10000 = 0.0001f;
 
-Vector2 previousEffectPosition;
+Vector2 previousEffectPosition = {0};
 
 // Use Gaussian Calculation to make the particles spread from the center
 float GetGaussianRandom(float mean, float stdDev) {
@@ -201,6 +201,10 @@ void UpdateDrawFrame(void)
                         particles[i].velocity.y -= dir.y * forceMultiplier;
                     }
                 }
+            }
+            else
+            {
+                previousEffectPosition = mousePos;
             }
 
             // Apply friction/damping
