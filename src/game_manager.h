@@ -194,7 +194,11 @@ bool UpdateDrawFrame(void)
 
             if (!justStarted)
             {
-                Vector2 mouseDelta = Vector2Subtract(touchPos, previousEffectPosition);
+                Vector2 mouseDelta = {0};
+                if (gesture != GESTURE_TAP)
+                {
+                    Vector2Subtract(touchPos, previousEffectPosition);
+                }
                 float segmentLengthSq = Vector2LengthSqr(mouseDelta);
 
                 for (int i = 0; i < MAX_PARTICLES; i++)
