@@ -281,7 +281,6 @@ bool UpdateDrawFrame(void)
 
         case STATE_RELAX:
             for (int i = 0; i < MAX_PARTICLES; i++) DrawPixelV(particles[i].position, particles[i].color);
-            DrawText(TextFormat("ActiveFingers: %i",activeFingers), 20, 20, 20, Fade(RAYWHITE, 0.6f));
             DrawText("Press ESC or 3-Finger Tap for Menu", 20, screenHeight - 30, 15, Fade(GRAY, 0.5f));
             break;
         default: break;
