@@ -15,6 +15,16 @@
     #include <emscripten/emscripten.h>
 #endif
 
+
+void UpdateDrawFrameWeb(void)
+{
+    if (!UpdateDrawFrame())
+    {
+        Destroy();
+        CloseWindow();
+    }
+}
+
 //------------------------------------------------------------------------------------
 // Program main entry point
 //------------------------------------------------------------------------------------
@@ -29,23 +39,19 @@ int main()
         return -1;
     }
 
-
 #if defined(PLATFORM_WEB)
-    emscripten_set_main_loop(UpdateDrawFrame, 0, 1);
+    emscripten_set_main_loop(UpdateDrawFrameWeb, 0, 1);
 #else
     SetTargetFPS(60);   // Set our game to run at 60 frames-per-second
 
     // Main game loop
-    while (!WindowShouldClose())
-    {
-        UpdateDrawFrame();
-    }
+    while (UpdateDrawFrame()) { }
 #endif
 
     // De-Initialization
     //--------------------------------------------------------------------------------------
-    CloseWindow();
     Destroy();
+    CloseWindow();
     //--------------------------------------------------------------------------------------
 
 #ifdef IS_ANDROID
