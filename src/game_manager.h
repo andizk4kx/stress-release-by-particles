@@ -32,6 +32,7 @@ ParticleColor selectedColor = COLOR_BLUE;
 bool justStarted = false;
 bool musicMuted = false;
 bool shouldClose = false; // Flag to exit the application
+bool needRestart = false;
 Vector2 previousEffectPosition = {0};
 Music backgroundMusic = {0};
 
@@ -109,12 +110,14 @@ bool UpdateDrawFrame(void)
     {
         screenWidth = GetScreenWidth();
         screenHeight = GetScreenHeight();
+        needRestart = true;
     }
 
     UpdateMusicStream(backgroundMusic);
     int gesture = GetGestureDetected();
     Vector2 touchPos = GetTouchPosition(0); 
     bool isActionPressed = IsMouseButtonPressed(MOUSE_LEFT_BUTTON) || (gesture == GESTURE_TAP);
+    int activeFingers = GetTouchPointCount();
 
     // --- LOGIC ---
     switch (currentState)
@@ -167,9 +170,13 @@ bool UpdateDrawFrame(void)
         } break;
 
         case STATE_RELAX: {
+            if (needRestart)
+            {
+                needRestart = false;
+                ResetParticles();
+            }
             float effectSize = (float)screenHeight*0.15f;
             float effectStrength = (float)screenHeight*0.002f;
-            int activeFingers = GetTouchPointCount();
 
             bool toggleRequested = IsMouseButtonPressed(MOUSE_RIGHT_BUTTON) || (gesture == GESTURE_DOUBLETAP);
             bool resetRequested = IsKeyPressed(KEY_R) || activeFingers >= 3;
@@ -195,9 +202,9 @@ bool UpdateDrawFrame(void)
             if (!justStarted)
             {
                 Vector2 mouseDelta = {0};
-                if (gesture != GESTURE_TAP)
+                if (gesture != GESTURE_TAP || activeFingers == 0)
                 {
-                    Vector2Subtract(touchPos, previousEffectPosition);
+                    mouseDelta = Vector2Subtract(touchPos, previousEffectPosition);
                 }
                 float segmentLengthSq = Vector2LengthSqr(mouseDelta);
 
@@ -274,7 +281,7 @@ bool UpdateDrawFrame(void)
 
         case STATE_RELAX:
             for (int i = 0; i < MAX_PARTICLES; i++) DrawPixelV(particles[i].position, particles[i].color);
-            // DrawText(currentEffect == EFFECT_ATTRACT ? "MODE: ATTRACT" : "MODE: REPEL", 20, 20, 20, Fade(RAYWHITE, 0.6f));
+            DrawText(TextFormat("ActiveFingers: %i",activeFingers), 20, 20, 20, Fade(RAYWHITE, 0.6f));
             DrawText("Press ESC or 3-Finger Tap for Menu", 20, screenHeight - 30, 15, Fade(GRAY, 0.5f));
             break;
         default: break;
