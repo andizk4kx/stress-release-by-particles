@@ -9,9 +9,8 @@
 
 #define MAX_PARTICLES 100000
 #define MAX_MUSIC_VOLUME 5.0f
-#define EFFECT_STRENGTH 2.5f
 
-typedef enum { STATE_MENU, STATE_ABOUT, STATE_RELAX, STATE_EXIT } GameState;
+typedef enum { STATE_MENU, STATE_ABOUT, STATE_RELAX } GameState;
 typedef enum { COLOR_BLUE, COLOR_GREEN, COLOR_RED } ParticleColor;
 typedef enum { EFFECT_ATTRACT, EFFECT_REPEL } EffectType;
 
@@ -31,7 +30,6 @@ ParticleColor selectedColor = COLOR_BLUE;
 
 bool justStarted = false;
 bool musicMuted = false;
-bool shouldClose = false; // Flag to exit the application
 bool needRestart = false;
 Vector2 previousEffectPosition = {0};
 Music backgroundMusic = {0};
@@ -48,25 +46,31 @@ float GetGaussianRandom(float mean, float stdDev)
     float theta = 2.0f*PI*u2;
     return (r*cosf(theta))*stdDev + mean;
 }
+Color GetSelectedColor(bool isSolid)
+{
+    int variantFrom = 100;
+    int variantTo = isSolid ? 100 : 255;
+    switch (selectedColor) {
+        case COLOR_BLUE:  return (Color){ GetRandomValue(variantFrom, variantTo), GetRandomValue(variantFrom, variantTo), 255, 255 }; break;
+        case COLOR_GREEN:  return (Color){ GetRandomValue(variantFrom, variantTo), 255, GetRandomValue(variantFrom, variantTo), 255 }; break;
+        case COLOR_RED:  return (Color){ 255, GetRandomValue(variantFrom, variantTo), GetRandomValue(variantFrom, variantTo), 255 }; break;
+    }
+}
 
 void ResetParticles(void)
 {
     if (particles == NULL) return;
-    float centerX = screenWidth*0.5f;
-    float centerY = screenHeight*0.5f;
-    float spreadX = screenWidth*0.166f;
-    float spreadY = screenHeight*0.166f;
+    float centerX = (float)screenWidth*0.5f;
+    float centerY = (float)screenHeight*0.5f;
+    float spreadX = (float)screenWidth*0.166f;
+    float spreadY = (float)screenHeight*0.166f;
 
     for (int i = 0; i < MAX_PARTICLES; i++) {
         particles[i].position.x = GetGaussianRandom(centerX, spreadX);
         particles[i].position.y = GetGaussianRandom(centerY, spreadY);
         particles[i].velocity = (Vector2){ (float)GetRandomValue(-5, 5)*0.1f, (float)GetRandomValue(-5, 5)*0.1f };
         
-        switch (selectedColor) {
-            case COLOR_BLUE:  particles[i].color = (Color){ GetRandomValue(100, 255), GetRandomValue(100, 255), 255, 255 }; break;
-            case COLOR_GREEN:  particles[i].color = (Color){ GetRandomValue(100, 255), 255, GetRandomValue(100, 255), 255 }; break;
-            case COLOR_RED:  particles[i].color = (Color){ 255, GetRandomValue(100, 255), GetRandomValue(100, 255), 255 }; break;
-        }
+        particles[i].color = GetSelectedColor(false);
     }
 }
 
@@ -126,12 +130,13 @@ bool UpdateDrawFrame(void)
         {
             if (isActionPressed)
             {
+                float halfScreen = (float)screenHeight*0.5f;
                 // Large touch zones for menu items
-                if (touchPos.y > screenHeight*0.35f && touchPos.y < screenHeight*0.45f)
+                if (touchPos.y > 20 && touchPos.y < 60)
                 {
                     selectedColor = (selectedColor + 1) % 3;
                 }
-                else if (touchPos.y > screenHeight*0.45f && touchPos.y < screenHeight*0.55f)
+                else if (touchPos.y > 60 && touchPos.y < 100)
                 {
                     musicMuted = !musicMuted;
                     if (musicMuted)
@@ -143,16 +148,16 @@ bool UpdateDrawFrame(void)
                         SetMusicVolume(backgroundMusic, MAX_MUSIC_VOLUME);
                     }
                 }
-                else if (touchPos.y > screenHeight*0.55f && touchPos.y < screenHeight*0.65f)
+                else if (touchPos.y > halfScreen - 30 && touchPos.y < halfScreen + 30)
                 {
                     ResetParticles();
                     currentState = STATE_RELAX;
                 }
-                else if (touchPos.y > screenHeight*0.65f && touchPos.y < screenHeight*0.75f)
+                else if (touchPos.y > halfScreen + 30 && touchPos.y < halfScreen + 80)
                 {
                     currentState = STATE_ABOUT;
                 }
-                else if (touchPos.y > screenHeight*0.80f)
+                else if (touchPos.y > halfScreen + 80 && touchPos.y < halfScreen + 130)
                 {
                     return false;
                 }
@@ -236,9 +241,9 @@ bool UpdateDrawFrame(void)
                     particles[i].position.y += particles[i].velocity.y;
 
                     if (particles[i].position.x < 0) particles[i].position.x = (float)screenWidth;
-                    if (particles[i].position.x > screenWidth) particles[i].position.x = 0;
+                    if (particles[i].position.x > (float)screenWidth) particles[i].position.x = 0;
                     if (particles[i].position.y < 0) particles[i].position.y = (float)screenHeight;
-                    if (particles[i].position.y > screenHeight) particles[i].position.y = 0;
+                    if (particles[i].position.y > (float)screenHeight) particles[i].position.y = 0;
                 }
             }
             previousEffectPosition = touchPos;
@@ -254,29 +259,32 @@ bool UpdateDrawFrame(void)
     switch (currentState)
     {
         case STATE_MENU:
-            DrawText("Stress Release By Particles", screenWidth/2 - MeasureText("Stress Release By Particles", 40)/2, screenHeight*0.15f, 40, RAYWHITE);
+        {
+            Color uiColor = GetSelectedColor(true);
             
             DrawText(TextFormat("COLOR: %s", (selectedColor == COLOR_BLUE) ? "BLUE" : (selectedColor == COLOR_GREEN ? "GREEN" : "RED")), 
-                     screenWidth/2 - 80, screenHeight*0.4f, 20, RAYWHITE);
+                     screenWidth - 160, 20, 20, uiColor);
             
             DrawText(TextFormat("MUSIC: %s", musicMuted ? "OFF" : "ON"), 
-                     screenWidth/2 - 80, screenHeight*0.5f, 20, musicMuted ? RED : GREEN);
+                     screenWidth - 160, 60, 20, musicMuted ? RED : uiColor);
+
+            DrawText("Stress Release By Particles", screenWidth/2 - MeasureText("Stress Release By Particles", 40)/2, (int)((float)screenHeight*0.5f)-130, 40, uiColor);
             
-            DrawText("START RELAXING", screenWidth/2 - MeasureText("START RELAXING", 25)/2, screenHeight*0.6f, 25, GOLD);
+            DrawText("START RELAXING", screenWidth/2 - MeasureText("START RELAXING", 25)/2, (int)((float)screenHeight*0.5f)-30, 25, uiColor);
             
-            DrawText("ABOUT", screenWidth/2 - MeasureText("ABOUT", 20)/2, screenHeight*0.7f, 20, LIGHTGRAY);
+            DrawText("ABOUT", screenWidth/2 - MeasureText("ABOUT", 20)/2, (int)((float)screenHeight*0.5f)+30, 20, uiColor);
             
-            DrawText("EXIT", screenWidth/2 - MeasureText("EXIT", 20)/2, screenHeight*0.84f, 20, MAROON);
-            break;
+            DrawText("EXIT", screenWidth/2 - MeasureText("EXIT", 20)/2, (int)((float)screenHeight*0.5f)+80, 20, uiColor);
+        } break;
 
         case STATE_ABOUT:
-            DrawText("ABOUT", screenWidth/2 - MeasureText("ABOUT", 30)/2, screenHeight*0.2f, 30, RAYWHITE);
-            DrawText("A minimalist particle experience.", screenWidth/2 - 140, screenHeight*0.4f, 20, GRAY);
-            DrawText("Tap/Click to interact.", screenWidth/2 - 100, screenHeight*0.45f, 20, GRAY);
-            DrawText("Double Tap to toggle mode.", screenWidth/2 - 120, screenHeight*0.5f, 20, GRAY);
+            DrawText("ABOUT", screenWidth/2 - MeasureText("ABOUT", 30)/2, (int)((float)screenHeight*0.2f), 30, RAYWHITE);
+            DrawText("A minimalist particle experience.", screenWidth/2 - 140, (int)((float)screenHeight*0.4f), 20, GRAY);
+            DrawText("Tap/Click to interact.", screenWidth/2 - 100, (int)((float)screenHeight*0.45f), 20, GRAY);
+            DrawText("Double Tap to toggle mode.", screenWidth/2 - 120, (int)((float)screenHeight*0.5f), 20, GRAY);
             const char *attribution = TextFormat("Documentary Background Music by Muyo5438\nhttps://freesound.org/s/712110/\nLicense: Attribution 4.0");
-            DrawText(attribution, screenWidth/2 - MeasureText(attribution, 20)/2, screenHeight*0.6f, 20, GRAY);
-            DrawText("TAP ANYWHERE TO GO BACK", screenWidth/2 - 150, screenHeight*0.8f, 15, DARKGRAY);
+            DrawText(attribution, screenWidth/2 - MeasureText(attribution, 20)/2, (int)((float)screenHeight*0.6f), 20, GRAY);
+            DrawText("TAP ANYWHERE TO GO BACK", screenWidth/2 - 150, (int)((float)screenHeight*0.8f), 15, DARKGRAY);
             break;
 
         case STATE_RELAX:

@@ -1,4 +1,4 @@
-package ovh.maicongamedev.antistressparticles;
+package ovh.maicongamedev.stressreleasebyparticles;
 
 import android.os.Build;
 import android.view.Display;

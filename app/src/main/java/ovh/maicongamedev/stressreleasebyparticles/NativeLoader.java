@@ -22,11 +22,13 @@
  *  SOFTWARE.
  */
 
-package ovh.maicongamedev.antistressparticles;  // Don't change the package name (see gradle.properties)
+package ovh.maicongamedev.stressreleasebyparticles;  // Don't change the package name (see gradle.properties)
 
 import android.app.NativeActivity;
 import android.view.KeyEvent;
 import android.os.Bundle;
+
+import ovh.maicongamedev.stressreleasebyparticles.BuildConfig;
 
 public class NativeLoader extends NativeActivity {
 
@@ -39,7 +41,7 @@ public class NativeLoader extends NativeActivity {
         super.onCreate(savedInstanceState);
         displayManager = new DisplayManager(this);
 //        softKeyboard = new SoftKeyboard(this);
-        System.loadLibrary("antistressparticles");   // Load your game library (don't change raymob, see gradle.properties)
+        System.loadLibrary("stressreleasebyparticles");   // Load your game library (don't change raymob, see gradle.properties)
     }
 
     // Handling loss and regain of application focus

@@ -22,7 +22,7 @@
  *  SOFTWARE.
  */
 
-package ovh.maicongamedev.antistressparticles;
+package ovh.maicongamedev.stressreleasebyparticles;
 
 import android.view.inputmethod.InputMethodManager;
 import android.app.NativeActivity;
