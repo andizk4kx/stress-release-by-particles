@@ -118,7 +118,7 @@ global function Init()
     if (length(particles) < 2) then return false end if
 
     ResetParticles()
-    SetTargetFPS(60)
+    --SetTargetFPS(30)
     return true
 end function
 
