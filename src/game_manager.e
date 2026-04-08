@@ -1,6 +1,6 @@
 without warning
 --adapted to Phix/Euphoria 2026 Andreas Wagner
-include "..\\..\\raylib64.e"
+include "raylib64.e"
 --/**/constant PI_=PI
 --/*
 constant true = 1
@@ -40,6 +40,9 @@ sequence backgroundMusic = {}
 
 constant inv10000 = 0.0001
 
+integer maxParticles = MAX_PARTICLES
+sequence maxParticlesOptions = {10000, 15000, 20000,25000}
+integer maxParticlesOptionsIndex = 1
 -- --- UTILS ---
 
 function GetGaussianRandom(atom mean, atom stdDev)
@@ -70,18 +73,22 @@ function GetSelectedColor(integer isSolid)
             return { 255, GetRandomValue(variantFrom, variantTo), GetRandomValue(variantFrom, variantTo), 255 } 
             break
         case else 
+            return { 255, GetRandomValue(variantFrom, variantTo), GetRandomValue(variantFrom, variantTo), 255 } --RED Fallback
             break
     end switch
 end function
 
 procedure ResetParticles()
-    if (length(particles) <2) then return end if
+    if (length(particles) <maxParticles) 
+    then 
+        particles = repeat(Particle,maxParticles)
+    end if
     atom centerX =  screenWidth*0.5
     atom centerY =  screenHeight*0.5
     atom spreadX =  screenWidth*0.166
     atom spreadY =  screenHeight*0.166
 
-    for i = 1 to MAX_PARTICLES 
+    for i = 1 to maxParticles 
     do
         particles[i][_position][x] = GetGaussianRandom(centerX, spreadX)
         particles[i][_position][y] = GetGaussianRandom(centerY, spreadY)
@@ -114,7 +121,7 @@ global function Init()
     screenWidth = GetScreenWidth()
     screenHeight = GetScreenHeight()
 
-    particles = repeat(Particle,MAX_PARTICLES)
+    particles = repeat(Particle,maxParticles)
     if (length(particles) < 2) then return false end if
 
     ResetParticles()
@@ -148,8 +155,8 @@ global function UpdateDrawFrame()
                 -- Large touch zones for menu items
                 if (touchPos[y] > 20 and touchPos[y] < 60)
                 then
-                    selectedColor = mod((selectedColor + 1), 3)
-                elsif (touchPos[y] > 60 and touchPos[y] < 100)
+                    selectedColor = (mod((selectedColor + 1), 3))
+                elsif (touchPos[y] > 60 and touchPos[y] < 80)
                 then
                     musicMuted = not(musicMuted)
                     if (musicMuted)
@@ -158,6 +165,17 @@ global function UpdateDrawFrame()
                     else
                         SetMusicVolume(backgroundMusic, MAX_MUSIC_VOLUME)
                     end if
+                elsif (touchPos[y] > 80 and touchPos[y] < 110)
+                then
+                    maxParticlesOptionsIndex = maxParticlesOptionsIndex + 1
+                    if maxParticlesOptionsIndex> length(maxParticlesOptions) then
+                        maxParticlesOptionsIndex=1
+                    end if
+                    if maxParticlesOptionsIndex< 1 then
+                        maxParticlesOptionsIndex=length(maxParticlesOptions)
+                    end if
+                    maxParticles = maxParticlesOptions[maxParticlesOptionsIndex]
+                
                 elsif (touchPos[y] > halfScreen - 30 and touchPos[y] < halfScreen + 30)
                 then
                     ResetParticles()
@@ -227,7 +245,7 @@ global function UpdateDrawFrame()
                 end if
                 atom segmentLengthSq = Vector2LengthSqr(mouseDelta)
 
-                for i = 1 to MAX_PARTICLES
+                for i = 1 to maxParticles
                 do
                     if (isDown)
                     then
@@ -273,6 +291,8 @@ global function UpdateDrawFrame()
     end switch
 
     -- --- DRAW ---
+    sequence TEXT="NONE"
+    sequence col=RED
     BeginDrawing()
     ClearBackground(BLACK)
 
@@ -281,15 +301,32 @@ global function UpdateDrawFrame()
         case STATE_MENU
         then
             sequence uiColor = GetSelectedColor(true)
+            if selectedColor=COLOR_BLUE 
+            then
+                TEXT="BLUE"
+            elsif selectedColor=COLOR_GREEN
+            then
+                TEXT="GREEN"
+            else
+                TEXT="RED"  
+            end if
+            DrawText(TextFormat("COLOR: %s", {TEXT}), screenWidth - 160, 20, 20, uiColor)
+            if musicMuted then
+                TEXT="OFF"
+            else
+                TEXT="ON"
+            end if
             
---          DrawText(TextFormat("COLOR: %s", (selectedColor == COLOR_BLUE) ? "BLUE" : (selectedColor == COLOR_GREEN ? "GREEN" : "RED")), 
---                   screenWidth - 160, 20, 20, uiColor);
-            
---          DrawText(TextFormat("MUSIC: %s", musicMuted ? "OFF" : "ON"), 
---                   screenWidth - 160, 60, 20, musicMuted ? RED : uiColor);
+            if musicMuted 
+            then
+                col=RED
+            else
+                col=uiColor
+            end if
+            DrawText(TextFormat("MUSIC: %s", {TEXT}), screenWidth - 160, 60, 20, col)
 
             DrawText("Stress Release By Particles", screenWidth/2 - MeasureText("Stress Release By Particles", 40)/2, (screenHeight*0.5)-130, 40, uiColor)
-            
+            DrawText(TextFormat("PARTICLES: %d", maxParticles), screenWidth - 215, 80, 20, uiColor)
             DrawText("START RELAXING", screenWidth/2 - MeasureText("START RELAXING", 25)/2, (screenHeight*0.5)-30, 25, uiColor)
             
             DrawText("ABOUT", screenWidth/2 - MeasureText("ABOUT", 20)/2, (screenHeight*0.5)+30, 20, uiColor)
@@ -310,7 +347,7 @@ global function UpdateDrawFrame()
 
         case STATE_RELAX
         then
-            for i = 1 to MAX_PARTICLES 
+            for i = 1 to maxParticles 
             do
                 _DrawPixelV(particles[i][_position], particles[i][color])
             end for
