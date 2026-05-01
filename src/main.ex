@@ -2,12 +2,13 @@
 -- Created by maiconpintoabreu on 25/02/2026.
 --
 --adapted to Phix/Euphoria 2026 Andreas Wagner
-include "raylib64.e"
+include "..\\..\\raylib64.e"
+--/*
+--include raylib.e
+--*/
 
-
-include "game_manager.e"
-
-
+include "game_manager_nopixel.e"
+--include "game_manager.e"
 
 
 --------------------------------------------------------------------------------------

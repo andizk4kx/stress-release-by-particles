@@ -1,14 +1,15 @@
 without warning
--------------------------------------------
--- This wrapper is based on this work:
--------------------------------------------
---https://github.com/gAndy50/EuRayLib5
---Euraylib 
---Written by Andy P. 
---Copyright (c) 2024
---Wrapper of Raylib 5.5 for OpenEuphoria
---OpenEuphoria v. 4.1.0 Beta 2
--------------------------------------------
+/*******************************************************************************************
+ *
+ *   Copyright (c) 2026 Andreas Wagner (andizk4kx)
+ *   Based on EuRayLib5 by gAndy50 and raylib by Ramon Santamaria
+ *
+ *   This software is provided 'as-is', without any express or implied warranty. 
+ *   Distributed under the terms of the zlib license.
+ *   Full license text available in the LICENSE file.
+ *
+ ********************************************************************************************/
+
 --/*
 --include std/ffi.e
 include std/error.e
@@ -87,7 +88,8 @@ constant Vector2=C_INT64,
 global atom ray 
 
 ifdef WINDOWS then
-        ray = open_dll({"libraylib.dll","../../libraylib.dll","../../bin/libraylib.dll","bin/libraylib.dll","../bin/libraylib.dll"})
+        ray = open_dll({"libraylib.dll","../libraylib.dll","../../libraylib.dll","../../bin/libraylib.dll","bin/libraylib.dll","../bin/libraylib.dll"})
+--      ray = open_dll({"libraylib_rl.dll"})
 end ifdef
 
 if ray = 0 then
@@ -106,10 +108,10 @@ end function
 
 
 --Raylib Version
-public constant RAYLIB_VERSION_MAJOR = 5
-public constant RAYLIB_VERSION_MINOR = 5
-public constant RAYLIB_VERSION_PATCH = 0
-public constant RAYLIB_VERSION = "5.5"
+global constant RAYLIB_VERSION_MAJOR = 6
+global constant RAYLIB_VERSION_MINOR = 0
+global constant RAYLIB_VERSION_PATCH = 0
+global constant RAYLIB_VERSION = "6.0"
 
 --Basic Defines
 global constant PI = 3.14159265358979323846
@@ -594,6 +596,80 @@ end for
 return mem
 end function
 
+global sequence Tmesh=repeat(0,16)
+constant size_mesh=120
+global function peek_mesh(atom pMesh)
+    -- pMesh: Pointer auf die Mesh-Struktur im RAM
+    -- Rückgabe: Eine Sequence mit allen Mesh-Daten und Pointern
+    
+    sequence mesh = {
+        peek4s(pMesh + 0),      -- [1] vertexCount
+        peek4s(pMesh + 4),      -- [2] triangleCount
+        
+        -- Attribut-Pointer (8-Byte)
+        peek8u(pMesh + 8),      -- [3] vertices (float*)
+        peek8u(pMesh + 16),     -- [4] texcoords (float*)
+        peek8u(pMesh + 24),     -- [5] texcoords2 (float*)
+        peek8u(pMesh + 32),     -- [6] normals (float*)
+        peek8u(pMesh + 40),     -- [7] tangents (float*)
+        peek8u(pMesh + 48),     -- [8] colors (uchar*)
+        peek8u(pMesh + 56),     -- [9] indices (ushort*)
+        
+        -- Animation / Skinning
+        peek4s(pMesh + 64),     -- [10] boneCount (int)
+        -- (+4 Bytes Padding hier, da der nächste Wert ein Pointer ist)
+        peek8u(pMesh + 72),     -- [11] boneIndices (uchar*)
+        peek8u(pMesh + 80),     -- [12] boneWeights (float*)
+        
+        -- CPU Skinning / AnimData
+        peek8u(pMesh + 88),     -- [13] animVertices (float*)
+        peek8u(pMesh + 96),     -- [14] animNormals (float*)
+        
+        -- Rendering IDs
+        peek4u(pMesh + 104),    -- [15] vaoId (uint)
+        -- (+4 Bytes Padding hier, da der nächste Wert ein Pointer ist)
+        peek8u(pMesh + 112)     -- [16] vboId (uint* - Pointer auf ID-Array)
+    }
+    
+    return mesh
+end function
+
+function poke_mesh(atom mem, sequence mesh)
+    -- mesh = {vertexCount(1), triangleCount(2), vertices(3), texcoords(4), 
+    --         texcoords2(5), normals(6), tangents(7), colors(8), indices(9), 
+    --         boneCount(10), boneIndices(11), boneWeights(12), 
+    --         animVertices(13), animNormals(14), vaoId(15), vboId(16)}
+
+    poke4(mem + 0,  mesh[1])   -- vertexCount
+    poke4(mem + 4,  mesh[2])   -- triangleCount
+    
+    -- Vertex attributes data (Pointer)
+    poke8(mem + 8,  mesh[3])   -- vertices
+    poke8(mem + 16, mesh[4])   -- texcoords
+    poke8(mem + 24, mesh[5])   -- texcoords2
+    poke8(mem + 32, mesh[6])   -- normals
+    poke8(mem + 40, mesh[7])   -- tangents
+    poke8(mem + 48, mesh[8])   -- colors
+    poke8(mem + 56, mesh[9])   -- indices
+
+    -- Skin data / Animation
+    poke4(mem + 64, mesh[10])  -- boneCount (int)
+    -- Offset 68 ist Padding (4 Bytes)
+    poke8(mem + 72, mesh[11])  -- boneIndices (Pointer)
+    poke8(mem + 80, mesh[12])  -- boneWeights (Pointer)
+
+    -- CPU Skinning data
+    poke8(mem + 88, mesh[13])  -- animVertices (Pointer)
+    poke8(mem + 96, mesh[14])  -- animNormals (Pointer)
+
+    -- OpenGL identifiers
+    poke4(mem + 104, mesh[15]) -- vaoId (uint)
+    -- Offset 108 ist Padding (4 Bytes)
+    poke8(mem + 112, mesh[16]) -- vboId (uint* Pointer)
+
+    return mem
+end function
+
 
 -- Helper (kind off a primitive state-manager) for GUI not in Raylib API handling for more Phix/Euphoria Style coding (less Pointer)
 sequence ids={{0,allocate(8)}}
@@ -665,6 +741,19 @@ else
     ids=append(ids,{idval[1],allocate(8)})
     addr=get_addr_(idval[1])
     poke4(addr,idval[2])  -- for setting a start value
+end if
+return addr
+end function
+
+global function get_addr_string(sequence idval) -- aet the buffer to 1024
+atom addr=get_addr_(idval[1])
+atom dummy
+if (addr>0) then
+    dummy=poke_string(addr,1024,idval[2])
+else
+    ids=append(ids,{idval[1],allocate(1024)})
+    addr=get_addr_(idval[1])
+    dummy=poke_string(addr,1024,idval[2])  -- for setting a start value
 end if
 return addr
 end function
@@ -1106,7 +1195,7 @@ global constant     NPATCH_NINE_PATCH = 0,        --  // Npatch layout: 3x3 tile
 --Callbacks TODO
 
 --Window Functions
-public constant xInitWindow = define_c_proc(ray,"+InitWindow",{C_INT,C_INT,C_STRING}),
+constant xInitWindow = define_c_proc(ray,"+InitWindow",{C_INT,C_INT,C_STRING}),
                                 xCloseWindow = define_c_proc(ray,"+CloseWindow",{}),
                                 xWindowShouldClose = define_c_func(ray,"+WindowShouldClose",{},C_BOOL),
                                 xIsWindowReady = define_c_func(ray,"+IsWindowReady",{},C_BOOL),
@@ -1156,81 +1245,81 @@ public constant xInitWindow = define_c_proc(ray,"+InitWindow",{C_INT,C_INT,C_STR
                                 xEnableEventWaiting = define_c_proc(ray,"+EnableEventWaiting",{}),
                                 xDisableEventWaiting = define_c_proc(ray,"+DisableEventWaiting",{})
 
-public procedure InitWindow(atom width,atom height,sequence title)
+global procedure InitWindow(atom width,atom height,sequence title)
 atom pstr=allocate_string(title)
         c_proc(xInitWindow,{width,height,pstr})
 free(pstr)
 end procedure
 
-public procedure CloseWindow()
+global procedure CloseWindow()
         c_proc(xCloseWindow,{})
 end procedure
 
-public function WindowShouldClose()
+global function WindowShouldClose()
         return c_func(xWindowShouldClose,{})
 end function
 
-public function IsWindowReady()
+global function IsWindowReady()
         return c_func(xIsWindowReady,{})
 end function
 
-public function IsWindowFullscreen()
+global function IsWindowFullscreen()
         return c_func(xIsWindowFullscreen,{})
 end function
 
-public function IsWindowHidden()
+global function IsWindowHidden()
         return c_func(xIsWindowHidden,{})
 end function
 
-public function IsWindowMinimized()
+global function IsWindowMinimized()
         return c_func(xIsWindowMinimized,{})
 end function
 
-public function IsWindowMaximized()
+global function IsWindowMaximized()
         return c_func(xIsWindowMaximized,{})
 end function
 
-public function IsWindowFocused()
+global function IsWindowFocused()
         return c_func(xIsWindowFocused,{})
 end function
 
-public function IsWindowResized()
+global function IsWindowResized()
         return c_func(xIsWindowResized,{})
 end function
 
-public function IsWindowState(atom flag)
+global function IsWindowState(atom flag)
         return c_func(xIsWindowState,{flag})
 end function
 
-public procedure SetWindowState(atom flags)
+global procedure SetWindowState(atom flags)
         c_proc(xSetWindowState,{flags})
 end procedure
 
-public procedure ClearWindowState(atom flags)
+global procedure ClearWindowState(atom flags)
         c_proc(xClearWindowState,{flags})
 end procedure
 
-public procedure ToggleFullscreen()
+global procedure ToggleFullscreen()
         c_proc(xToggleFullscreen,{})
 end procedure
 
-public procedure ToggleBorderlessWindowed()
+global procedure ToggleBorderlessWindowed()
         c_proc(xToggleBorderlessWindowed,{})
 end procedure
 
-public procedure MaximizeWindow()
+global procedure MaximizeWindow()
         c_proc(xMaximizeWindow,{})
 end procedure
 
-public procedure MinimizeWindow()
+global procedure MinimizeWindow()
         c_proc(xMinimizeWindow,{})
 end procedure
 
-public procedure RestoreWindow()
+global procedure RestoreWindow()
         c_proc(xRestoreWindow,{})
 end procedure
 
-public procedure SetWindowIcon(sequence image)
+global procedure SetWindowIcon(sequence image)
 atom mem=allocate(24)
 poke8(mem,image[1])
 poke4(mem+8,image[2])
@@ -1241,122 +1330,125 @@ poke4(mem+20,image[5])
 end procedure
 
 --CHECK images should be a Pointer to an array[1..count] of images
-public procedure SetWindowIcons(atom images,atom count)
+global procedure SetWindowIcons(atom images,atom count)
         c_proc(xSetWindowIcons,{images,count})
 end procedure
 
-public procedure SetWindowTitle(sequence title)
+global procedure SetWindowTitle(sequence title)
 atom pstr=allocate_string(title)
         c_proc(xSetWindowTitle,{title})
 free(pstr)
 end procedure
 
-public procedure SetWindowPosition(atom x,atom y)
+global procedure SetWindowPosition(atom x,atom y)
         c_proc(xSetWindowPosition,{x,y})
 end procedure
 
-public procedure SetWindowMonitor(atom monitor)
+global procedure SetWindowMonitor(atom monitor)
         c_proc(xSetWindowMonitor,{monitor})
 end procedure
 
-public procedure SetWindowMinSize(atom width,atom height)
+global procedure SetWindowMinSize(atom width,atom height)
         c_proc(xSetWindowMinSize,{width,height})
 end procedure
 
-public procedure SetWindowMaxSize(atom width,atom height)
+global procedure SetWindowMaxSize(atom width,atom height)
         c_proc(xSetWindowMaxSize,{width,height})
 end procedure
 
-public procedure SetWindowSize(atom width,atom height)
+global procedure SetWindowSize(atom width,atom height)
         c_proc(xSetWindowSize,{width,height})
 end procedure
 
-public procedure SetWindowOpacity(atom opacity)
+global procedure SetWindowOpacity(atom opacity)
         c_proc(xSetWindowOpacity,{opacity})
 end procedure
 
-public procedure SetWindowFocused()
+global procedure SetWindowFocused()
         c_proc(xSetWindowFocused,{})
 end procedure
 
-public function GetWindowHandle()
+global function GetWindowHandle()
         return c_func(xGetWindowHandle,{})
 end function
 
-public function GetScreenWidth()
+global function GetScreenWidth()
         return c_func(xGetScreenWidth,{})
 end function
 
-public function GetScreenHeight()
+global function GetScreenHeight()
         return c_func(xGetScreenHeight,{})
 end function
 
-public function GetRenderWidth()
+global function GetRenderWidth()
         return c_func(xGetRenderWidth,{})
 end function
 
-public function GetRenderHeight()
+global function GetRenderHeight()
         return c_func(xGetRenderHeight,{})
 end function
 
-public function GetMonitorCount()
+global function GetMonitorCount()
         return c_func(xGetMonitorCount,{})
 end function
 
-public function GetCurrentMonitor()
+global function GetCurrentMonitor()
         return c_func(xGetCurrentMonitor,{})
 end function
 
-public function GetMonitorPosition(atom monitor)
+global function GetMonitorPosition(atom monitor)
         return RegtoV2(c_func(xGetMonitorPosition,{monitor}))
 end function
 
-public function GetMonitorWidth(atom monitor)
+global function GetMonitorWidth(atom monitor)
         return c_func(xGetMonitorWidth,{monitor})
 end function
 
-public function GetMonitorHeight(atom monitor)
+global function GetMonitorHeight(atom monitor)
         return c_func(xGetMonitorHeight,{monitor})
 end function
 
-public function GetMonitorPhysicalWidth(atom monitor)
+global function GetMonitorPhysicalWidth(atom monitor)
         return c_func(xGetMonitorPhysicalWidth,{monitor})
 end function
 
-public function GetMonitorPhysicalHeight(atom monitor)
+global function GetMonitorPhysicalHeight(atom monitor)
         return c_func(xGetMonitorPhysicalHeight,{monitor})
 end function
 
-public function GetMonitorRefreshRate(atom monitor)
+global function GetMonitorRefreshRate(atom monitor)
         return c_func(xGetMonitorRefreshRate,{monitor})
 end function
 
-public function GetWindowPosition()
+global function GetWindowPosition()
         return RegtoV2(c_func(xGetWindowPosition,{}))
 end function
 
-public function GetWindowScaleDPI()
+global function GetWindowScaleDPI()
         return RegtoV2(c_func(xGetWindowScaleDPI,{}))
 end function
 
 -- CHECK
-public function GetMonitorName(atom monitor)
+global function GetMonitorName(atom monitor)
         return peek_string(c_func(xGetMonitorName,{monitor})) -- UTF-8 hopefully it works
 end function
 
-public procedure SetClipboardText(sequence text)
+global procedure SetClipboardText(sequence text)
+--if not length(text) then
+--  return
+--end if
 atom pstr = allocate_string(text)
-        c_proc(xSetClipboardText,{text})
+        c_proc(xSetClipboardText,{pstr})
 free(pstr)
 end procedure
 
-public function GetClipboardText()
+global function GetClipboardText()
 atom pstr
         pstr= c_func(xGetClipboardText,{})
         return peek_string(pstr)
 end function
 
-public function GetClipboardImage()
+global function GetClipboardImage()
 atom mem=allocate(24)
 atom erg
 sequence result={0,0,0,0,0}
@@ -1373,50 +1465,50 @@ free(mem)
 return result
 end function
 
-public procedure EnableEventWaiting()
+global procedure EnableEventWaiting()
         c_proc(xEnableEventWaiting,{})
 end procedure
 
-public procedure DisableEventWaiting()
+global procedure DisableEventWaiting()
         c_proc(xDisableEventWaiting,{})
 end procedure
 
 --Cursor functions
 
-public constant xShowCursor = define_c_proc(ray,"+ShowCursor",{}),
+global constant xShowCursor = define_c_proc(ray,"+ShowCursor",{}),
                                 xHideCursor = define_c_proc(ray,"+HideCursor",{}),
                                 xIsCursorHidden = define_c_func(ray,"+IsCursorHidden",{},C_BOOL),
                                 xEnableCursor = define_c_proc(ray,"+EnableCursor",{}),
                                 xDisableCursor = define_c_proc(ray,"+DisableCursor",{}),
                                 xIsCursorOnScreen = define_c_func(ray,"+IsCursorOnScreen",{},C_BOOL)
                                 
-public procedure ShowCursor()
+global procedure ShowCursor()
         c_proc(xShowCursor,{})
 end procedure
 
-public procedure HideCursor()
+global procedure HideCursor()
         c_proc(xHideCursor,{})
 end procedure
 
-public function IsCursorHidden()
+global function IsCursorHidden()
         return c_func(xIsCursorHidden,{})
 end function
 
-public procedure EnableCursor()
+global procedure EnableCursor()
         c_proc(xEnableCursor,{})
 end procedure
 
-public procedure DisableCursor()
+global procedure DisableCursor()
         c_proc(xDisableCursor,{})
 end procedure
 
-public function IsCursorOnScreen()
+global function IsCursorOnScreen()
         return c_func(xIsCursorOnScreen,{})
 end function
 
 --Drawing Functions
 
-public constant xClearBackground = define_c_proc(ray,"+ClearBackground",{C_Color}),
+constant xClearBackground = define_c_proc(ray,"+ClearBackground",{C_Color}),
                                 xBeginDrawing = define_c_proc(ray,"+BeginDrawing",{}),
                                 xEndDrawing = define_c_proc(ray,"+EndDrawing",{}),
                                 xBeginMode2D = define_c_proc(ray,"+BeginMode2D",{Camera2D}),
@@ -1434,96 +1526,96 @@ public constant xClearBackground = define_c_proc(ray,"+ClearBackground",{C_Color
                                 xBeginVrStereoMode = define_c_proc(ray,"+BeginVrStereoMode",{VrStereoConfig}),
                                 xEndVrStereoMode = define_c_proc(ray,"+EndVrStereoMode",{})
                                 
-public procedure ClearBackground(sequence color)
+global procedure ClearBackground(sequence color)
         c_proc(xClearBackground,{bytes_to_int(color)})
 end procedure
 
-public procedure BeginDrawing()
+global procedure BeginDrawing()
         c_proc(xBeginDrawing,{})
 end procedure
 
-public procedure EndDrawing()
+global procedure EndDrawing()
         c_proc(xEndDrawing,{})
 end procedure
 
-public procedure BeginMode2D(sequence camera2D)
+global procedure BeginMode2D(sequence camera2D)
 atom mem=allocate(size_camera2d)
         c_proc(xBeginMode2D,{poke_camera2d(mem,camera2D)})
 free(mem)
 end procedure
 
-public procedure EndMode2D()
+global procedure EndMode2D()
         c_proc(xEndMode2D,{})
 end procedure
 
-public procedure BeginMode3D(sequence camera3D)
+global procedure BeginMode3D(sequence camera3D)
 atom mem=allocate(size_camera3d)
         c_proc(xBeginMode3D,{poke_camera3d(mem,camera3D)})
 free(mem)
 end procedure
 
-public procedure EndMode3D()
+global procedure EndMode3D()
         c_proc(xEndMode3D,{})
 end procedure
 --CHECK
-public procedure BeginTextureMode(sequence target)
+global procedure BeginTextureMode(sequence target)
 atom addr=allocate(size_rendertexture)
         c_proc(xBeginTextureMode,{poke_rendertexture(addr,target)}) --target is RenderTexture2D
 free(addr)
 end procedure
 
-public procedure EndTextureMode()
+global procedure EndTextureMode()
         c_proc(xEndTextureMode,{})
 end procedure
 --CHECK
-public procedure BeginShaderMode(sequence shader)
+global procedure BeginShaderMode(sequence shader)
 --atom mem=allocate(size_shader)
         c_proc(xBeginShaderMode,{get_addr_shader({shader[3],shader})})
 --free(mem)
 end procedure
 
-public procedure EndShaderMode()
+global procedure EndShaderMode()
         c_proc(xEndShaderMode,{})
 end procedure
 
-public procedure BeginBlendMode(atom mode)
+global procedure BeginBlendMode(atom mode)
         c_proc(xBeginBlendMode,{mode})
 end procedure
 
-public procedure EndBlendMode()
+global procedure EndBlendMode()
         c_proc(xEndBlendMode,{})
 end procedure
 
-public procedure BeginScissorMode(atom x,atom y,atom width,atom height)
+global procedure BeginScissorMode(atom x,atom y,atom width,atom height)
         c_proc(xBeginScissorMode,{x,y,width,height})
 end procedure
 
-public procedure EndScissorMode()
+global procedure EndScissorMode()
         c_proc(xEndScissorMode,{})
 end procedure
 --CHECK
-public procedure BeginVrStereoMode(sequence config)
+global procedure BeginVrStereoMode(sequence config)
         c_proc(xBeginVrStereoMode,{config}) --config is VrStereoConfig
 end procedure
 
-public procedure EndVrStereoMode()
+global procedure EndVrStereoMode()
         c_proc(xEndVrStereoMode,{})
 end procedure
 --CHECK
 --VR Stereo config functions
-public constant xLoadVrStereoConfig = define_c_func(ray,"+LoadVrStereoConfig",{VrDeviceInfo},VrStereoConfig),
+global constant xLoadVrStereoConfig = define_c_func(ray,"+LoadVrStereoConfig",{VrDeviceInfo},VrStereoConfig),
                                 xUnloadVrStereoConfig = define_c_proc(ray,"+UnloadVrStereoConfig",{VrStereoConfig})
                                 
-public function LoadVrStereoConfig(sequence device)
+global function LoadVrStereoConfig(sequence device)
         return c_func(xLoadVrStereoConfig,{device}) --device is VrDeviceInfo
 end function
 
-public procedure UnloadVrStereoConfig(sequence config)
+global procedure UnloadVrStereoConfig(sequence config)
         c_proc(xUnloadVrStereoConfig,{config}) --config is VrStereoConfig
 end procedure
 
 --Shader functions
-public constant xLoadShader = define_c_func(ray,"+LoadShader",{C_HPTR,C_STRING,C_STRING},Shader),
+constant xLoadShader = define_c_func(ray,"+LoadShader",{C_HPTR,C_STRING,C_STRING},Shader),
                                 xLoadShaderFromMemory = define_c_func(ray,"+LoadShaderFromMemory",{C_STRING,C_STRING},Shader),
                                 xIsShaderValid = define_c_func(ray,"+IsShaderValid",{Shader},C_BOOL),
                                 xGetShaderLocation = define_c_func(ray,"+GetShaderLocation",{Shader,C_STRING},C_INT),
@@ -1534,7 +1626,7 @@ public constant xLoadShader = define_c_func(ray,"+LoadShader",{C_HPTR,C_STRING,C
                                 xSetShaderValueTexture = define_c_proc(ray,"+SetShaderValueTexture",{Shader,C_INT,Texture2D}),
                                 xUnloadShader = define_c_proc(ray,"+UnloadShader",{Shader})
                                 
-public function LoadShader(object  vsFileName,object  fsFileName)
+global function LoadShader(object  vsFileName,object  fsFileName)
 atom id=allocate(8)
 sequence shader=Tshader
 atom mem=get_addr_shader({id,shader})
@@ -1564,16 +1656,16 @@ shader=append(shader,mem)
 return shader
 end function
 
-public function LoadShaderFromMemory(sequence vsCode,sequence fsCode)
+global function LoadShaderFromMemory(sequence vsCode,sequence fsCode)
         return c_func(xLoadShaderFromMemory,{vsCode,fsCode})
 end function
 
-public function IsShaderValid(sequence shader)
+global function IsShaderValid(sequence shader)
 atom addr=get_addr_shader({shader[3],shader})
         return c_func(xIsShaderValid,{addr})
 end function
 
-public function GetShaderLocation(sequence shader,sequence uniformName)
+global function GetShaderLocation(sequence shader,sequence uniformName)
 atom addr=get_addr_shader({shader[3],shader})
 atom pstr=allocate_string(uniformName)
 atom result
@@ -1582,11 +1674,11 @@ free(pstr)
 return result
 end function
 
-public function GetShaderLocationAttrib(sequence shader,sequence attribName)
+global function GetShaderLocationAttrib(sequence shader,sequence attribName)
         return c_func(xGetShaderLocationAttrib,{shader,attribName})
 end function
 
-public procedure SetShaderValue(sequence shader,atom locIndex,object val,atom uniformType)
+global procedure SetShaderValue(sequence shader,atom locIndex,object val,atom uniformType)
 atom addr=get_addr_shader({shader[3],shader})
 atom val1
 if atom (val) 
@@ -1630,22 +1722,22 @@ end if
 free(val1)
 end procedure
 
-public procedure SetShaderValueV(sequence shader,atom locIndex,object val,atom uniformType,atom count)
+global procedure SetShaderValueV(sequence shader,atom locIndex,object val,atom uniformType,atom count)
         c_proc(xSetShaderValueV,{shader,locIndex,val,uniformType,count})
 end procedure
 
-public procedure SetShaderValueMatrix(sequence shader,atom locIndex,sequence mat)
+global procedure SetShaderValueMatrix(sequence shader,atom locIndex,sequence mat)
         c_proc(xSetShaderValueMatrix,{shader,locIndex,mat})
 end procedure
 
-public procedure SetShaderValueTexture(sequence shader,atom locIndex,sequence texture)
+global procedure SetShaderValueTexture(sequence shader,atom locIndex,sequence texture)
 atom addr=get_addr_shader({shader[3],shader})
 atom mem=allocate(size_texture)
         c_proc(xSetShaderValueTexture,{addr,locIndex,poke_texture(mem,texture)})
 free(mem)
 end procedure
 
-public procedure UnloadShader(sequence shader)
+global procedure UnloadShader(sequence shader)
 atom addr=get_addr_shader({shader[3],shader})
         c_proc(xUnloadShader,{addr})
 free(shader[3])
@@ -1653,7 +1745,7 @@ free(addr)
 end procedure
 
 --Screen space functions
-public constant xGetScreenToWorldRay = define_c_func(ray,"+GetScreenToWorldRay",{Vector2,Camera},Ray),
+constant xGetScreenToWorldRay = define_c_func(ray,"+GetScreenToWorldRay",{Vector2,Camera},Ray),
                                 xGetScreenToWorldRayEx = define_c_func(ray,"+GetScreenToWorldRayEx",{Vector2,Camera,C_INT,C_INT},Ray),
                                 xGetWorldToScreen = define_c_func(ray,"+GetWorldToScreen",{Vector3,Camera},Vector2),
                                 xGetWorldToScreenEx = define_c_func(ray,"+GetWorldToScreenEx",{Vector3,Camera,C_INT,C_INT},Vector2),
@@ -1662,27 +1754,31 @@ public constant xGetScreenToWorldRay = define_c_func(ray,"+GetScreenToWorldRay",
                                 xGetCameraMatrix = define_c_func(ray,"+GetCameraMatrix",{Camera},Matrix),
                                 xGetCameraMatrix2D = define_c_func(ray,"+GetCameraMatrix2D",{Camera2D},Matrix)
                                 
-public function GetScreenToWorldRay(sequence pos,sequence camera)
+global function GetScreenToWorldRay(sequence pos,sequence camera)
         return c_func(xGetScreenToWorldRay,{pos,camera})
 end function
 
-public function GetScreenToWorldRayEx(sequence pos,sequence camera,atom width,atom height)
+global function GetScreenToWorldRayEx(sequence pos,sequence camera,atom width,atom height)
         return c_func(xGetScreenToWorldRayEx,{pos,camera,width,height})
 end function
 
-public function GetWorldToScreen(sequence pos,sequence camera)
-        return c_func(xGetWorldToScreen,{pos,camera})
+global function GetWorldToScreen(sequence pos,sequence camera)
+atom vec=allocate(size_vector3)
+atom cam=allocate(size_camera3d)
+        return RegtoV2(c_func(xGetWorldToScreen,{poke_vector3(vec,pos),poke_camera3d(cam,camera)}))
+free(vec)
+free(cam)
 end function
 
-public function GetWorldToScreenEx(sequence pos,sequence camera,atom width,atom height)
+global function GetWorldToScreenEx(sequence pos,sequence camera,atom width,atom height)
         return c_func(xGetWorldToScreenEx,{pos,camera,width,height})
 end function
 
-public function GetWorldToScreen2D(sequence pos,sequence camera2D)
+global function GetWorldToScreen2D(sequence pos,sequence camera2D)
         return c_func(xGetWorldToScreen2D,{pos,camera2D})
 end function
 
-public function GetScreenToWorld2D(sequence pos,sequence camera2D)
+global function GetScreenToWorld2D(sequence pos,sequence camera2D)
 atom mem=allocate(24)
 poke(mem,atom_to_float32(camera2D[1][1]))
 poke(mem+4,atom_to_float32(camera2D[1][2]))
@@ -1696,106 +1792,112 @@ free(mem)
 return erg
 end function
 
-public function GetCameraMatrix(sequence camera)
+global function GetCameraMatrix(sequence camera)
         return c_func(xGetCameraMatrix,{camera})
 end function
 
-public function GetCameraMatrix2D(sequence camera)
+global function GetCameraMatrix2D(sequence camera)
         return c_func(xGetCameraMatrix2D,{camera})
 end function
 
 --Timing functions
 
-public constant xSetTargetFPS = define_c_proc(ray,"+SetTargetFPS",{C_INT}),
+global constant xSetTargetFPS = define_c_proc(ray,"+SetTargetFPS",{C_INT}),
                                 xGetFrameTime = define_c_func(ray,"+GetFrameTime",{},C_FLOAT),
                                 xGetTime = define_c_func(ray,"+GetTime",{},C_DOUBLE),
                                 xGetFPS = define_c_func(ray,"+GetFPS",{},C_INT)
                                 
-public procedure SetTargetFPS(atom fps)
+global procedure SetTargetFPS(atom fps)
         c_proc(xSetTargetFPS,{fps})
 end procedure
 
-public function GetFrameTime()
+global function GetFrameTime()
         return c_func(xGetFrameTime,{})
 end function
 
-public function GetTime()
+global function GetTime()
         return c_func(xGetTime,{})
 end function
 
-public function GetFPS()
+global function GetFPS()
         return c_func(xGetFPS,{})
 end function
 
 --Custom frame control functions
-public constant xSwapScreenBuffer = define_c_proc(ray,"+SwapScreenBuffer",{}),
+global constant xSwapScreenBuffer = define_c_proc(ray,"+SwapScreenBuffer",{}),
                 xPollInputEvents = define_c_proc(ray,"+PollInputEvents",{}),
                 xWaitTime = define_c_proc(ray,"+WaitTime",{C_DOUBLE})
                                 
-public procedure SwapScreenBuffer()
+global procedure SwapScreenBuffer()
         c_proc(xSwapScreenBuffer,{})
 end procedure
 
-public procedure PollInputEvents()
+global procedure PollInputEvents()
         c_proc(xPollInputEvents,{})
 end procedure
 
-public procedure WaitTime(atom seconds)
+global procedure WaitTime(atom seconds)
         c_proc(xWaitTime,{seconds})
 end procedure
 
 --Random value generation functions
-public constant xSetRandomSeed = define_c_proc(ray,"+SetRandomSeed",{C_UINT}),
+global constant xSetRandomSeed = define_c_proc(ray,"+SetRandomSeed",{C_UINT}),
                 xGetRandomValue = define_c_func(ray,"+GetRandomValue",{C_INT,C_INT},C_INT),
                 xLoadRandomSequence = define_c_func(ray,"+LoadRandomSequence",{C_UINT,C_INT,C_INT},C_POINTER),
                 xUnloadRandomSequence = define_c_proc(ray,"+UnloadRandomSequence",{C_POINTER})
                                 
-public procedure SetRandomSeed(atom seed)
+global procedure SetRandomSeed(atom seed)
         c_proc(xSetRandomSeed,{seed})
 end procedure
 
-public function GetRandomValue(atom min,atom max)
-        return rand_range(min,max)
+global function GetRandomValue(atom _min,atom _max)
+        return rand_range(_min,_max)
 --      return c_func(xGetRandomValue,{min,max})
 end function
 --CHECK
-public function LoadRandomSequence(atom count,atom min,atom max)
-        return c_func(xLoadRandomSequence,{count,min,max})
+global function LoadRandomSequence(atom count,atom _min,atom _max)
+sequence result=repeat(0,count)
+for i=1 to count  
+do
+    result[i]=rand_range(_min,_max)
+end for
+return result
+        --return c_func(xLoadRandomSequence,{count,min,max})
 end function
 
-public procedure UnloadRandomSequence(atom _seq)
+global procedure UnloadRandomSequence(atom _seq)
         c_proc(xUnloadRandomSequence,{_seq})
 end procedure
 
 --Misc functions
-public constant xTakeScreenshot = define_c_proc(ray,"+TakeScreenshot",{C_STRING}),
+global constant xTakeScreenshot = define_c_proc(ray,"+TakeScreenshot",{C_STRING}),
                                 xSetConfigFlags = define_c_proc(ray,"+SetConfigFlags",{C_UINT}),
                                 xOpenURL = define_c_proc(ray,"+OpenURL",{C_STRING})
                                 
-public procedure TakeScreenshot(sequence fName)
+global procedure TakeScreenshot(sequence fName)
 atom pstr=allocate_string(fName)
         c_proc(xTakeScreenshot,{fName})
 free(pstr)
 end procedure
 
-public procedure SetConfigFlags(atom flags)
+global procedure SetConfigFlags(atom flags)
         c_proc(xSetConfigFlags,{flags})
 end procedure
 
-public procedure OpenURL(sequence url)
+global procedure OpenURL(sequence url)
 atom pstr=allocate_string(url)
         c_proc(xOpenURL,{pstr})
 free(pstr)
 end procedure
 
 --
-public constant xTraceLog = define_c_proc(ray,"+TraceLog",{C_INT,C_STRING,C_POINTER}),
+constant xTraceLog = define_c_proc(ray,"+TraceLog",{C_INT,C_STRING,C_POINTER}),
                                 xSetTraceLogLevel = define_c_proc(ray,"+SetTraceLogLevel",{C_INT}),
                                 xMemAlloc = define_c_func(ray,"+MemAlloc",{C_UINT},C_POINTER),
                                 xMemRealloc = define_c_func(ray,"+MemRealloc",{C_POINTER,C_UINT},C_POINTER),
                                 xMemFree = define_c_proc(ray,"+MemFree",{C_POINTER})
 --CHECK                             
-public procedure TraceLog(atom logLevel,sequence text,object x=1)
+global procedure TraceLog(atom logLevel,sequence text,object x=1)
 atom pstr=allocate_string(text)
 atom vargs=allocate(8) -- really do not know hos to handle this
         c_proc(xTraceLog,{logLevel,pstr,vargs})
@@ -1803,26 +1905,26 @@ free(pstr)
 free(vargs)
 end procedure
 
-public procedure SetTraceLogLevel(atom logLevel)
+global procedure SetTraceLogLevel(atom logLevel)
         c_proc(xSetTraceLogLevel,{logLevel})
 end procedure
 
-public function MemAlloc(atom size)
+global function MemAlloc(atom size)
         return c_func(xMemAlloc,{size})
 end function
 
-public function MemRealloc(atom ptr,atom size)
+global function MemRealloc(atom ptr,atom size)
         return c_func(xMemRealloc,{ptr,size})
 end function
 
-public procedure MemFree(atom ptr)
+global procedure MemFree(atom ptr)
         c_proc(xMemFree,{ptr})
 end procedure
 
 --Custom callback functions TODO
 
 --File management functions
-public constant xLoadFileData = define_c_func(ray,"+LoadFileData",{C_STRING,C_POINTER},C_POINTER),
+constant xLoadFileData = define_c_func(ray,"+LoadFileData",{C_STRING,C_POINTER},C_POINTER),
                                 xUnloadFileData = define_c_proc(ray,"+UnloadFileData",{C_POINTER}),
                                 xSaveFileData = define_c_func(ray,"+SaveFileData",{C_STRING,C_POINTER,C_INT},C_BOOL),
                                 xExportDataAsCode = define_c_func(ray,"+ExportDataAsCode",{C_POINTER,C_INT,C_STRING},C_BOOL),
@@ -1830,36 +1932,36 @@ public constant xLoadFileData = define_c_func(ray,"+LoadFileData",{C_STRING,C_PO
                                 xUnloadFileText = define_c_proc(ray,"+UnloadFileText",{C_STRING}),
                                 xSaveFileText = define_c_func(ray,"+SaveFileText",{C_STRING,C_STRING},C_BOOL)
                                 
-public function LoadFileData(sequence fName,atom dataSize)
+global function LoadFileData(sequence fName,atom dataSize)
         return c_func(xLoadFileData,{fName,dataSize})
 end function
 
-public procedure UnloadFileData(atom data)
+global procedure UnloadFileData(atom data)
         c_proc(xUnloadFileData,{data})
 end procedure
 
-public function SaveFileData(sequence fname,object data,atom dataSize)
+global function SaveFileData(sequence fname,object data,atom dataSize)
         return c_func(xSaveFileData,{fname,data,dataSize})
 end function
 
-public function ExportDataAsCode(atom data,atom dataSize,sequence fname)
+global function ExportDataAsCode(atom data,atom dataSize,sequence fname)
         return c_func(xExportDataAsCode,{data,dataSize,fname})
 end function
 
-public function LoadFileText(sequence fname)
+global function LoadFileText(sequence fname)
         return c_func(xLoadFileText,{fname})
 end function
 
-public procedure UnloadFileText(sequence text)
+global procedure UnloadFileText(sequence text)
         c_proc(xUnloadFileText,{text})
 end procedure
 
-public function SaveFileText(sequence fname,sequence text)
+global function SaveFileText(sequence fname,sequence text)
         return c_func(xSaveFileText,{fname,text})
 end function
 
 --file system functions
-public constant xFileExists = define_c_func(ray,"+FileExists",{C_STRING},C_BOOL),
+constant xFileExists = define_c_func(ray,"+FileExists",{C_STRING},C_BOOL),
                                 xDirectoryExists = define_c_func(ray,"+DirectoryExists",{C_STRING},C_BOOL),
                                 xIsFileExtension = define_c_func(ray,"+IsFileExtension",{C_STRING,C_STRING},C_BOOL),
                                 xGetFileLength = define_c_func(ray,"+GetFileLength",{C_STRING},C_INT),
@@ -1882,96 +1984,96 @@ public constant xFileExists = define_c_func(ray,"+FileExists",{C_STRING},C_BOOL)
                                 xUnloadDroppedFiles = define_c_proc(ray,"+UnloadDroppedFiles",{FilePathList}),
                                 xGetFileModTime = define_c_func(ray,"+GetFileModTime",{C_STRING},C_LONG)
                                 
-public function FileExists(sequence fName)
+global function FileExists(sequence fName)
         return c_func(xFileExists,{fName})
 end function
 
-public function DirectoryExists(sequence dirPath)
+global function DirectoryExists(sequence dirPath)
         return c_func(xDirectoryExists,{dirPath})
 end function
 
-public function IsFileExtension(sequence fName,sequence ext)
+global function IsFileExtension(sequence fName,sequence ext)
         return c_func(xIsFileExtension,{fName,ext})
 end function
 
-public function GetFileLength(sequence fName)
+global function GetFileLength(sequence fName)
         return c_func(xGetFileLength,{fName})
 end function
 
-public function GetFileExtension(sequence fName)
+global function GetFileExtension(sequence fName)
         return c_func(xGetFileExtension,{fName})
 end function
 
-public function GetFileName(sequence filePath)
+global function GetFileName(sequence filePath)
         return c_func(xGetFileName,{filePath})
 end function
 
-public function GetFileNameWithoutExt(sequence filePath)
+global function GetFileNameWithoutExt(sequence filePath)
         return c_func(xGetFileNameWithoutExt,{filePath})
 end function
 
-public function GetDirectoryPath(sequence filePath)
+global function GetDirectoryPath(sequence filePath)
         return c_func(xGetDirectoryPath,{filePath})
 end function
 
-public function GetPrevDirectoryPath(sequence dirPath)
+global function GetPrevDirectoryPath(sequence dirPath)
         return c_func(xGetPrevDirectoryPath,{dirPath})
 end function
 
-public function GetWorkingDirectory()
+global function GetWorkingDirectory()
         return c_func(xGetWorkingDirectory,{})
 end function
 
-public function GetApplicationDirectory()
+global function GetApplicationDirectory()
         return c_func(xGetApplicationDirectory,{})
 end function
 
-public function MakeDirectory(sequence dirPath)
+global function MakeDirectory(sequence dirPath)
         return c_func(xMakeDirectory,{dirPath})
 end function
 
-public function ChangeDirectory(sequence _dir)
+global function ChangeDirectory(sequence _dir)
         return c_func(xChangeDirectory,{_dir})
 end function
 
-public function IsPathFile(sequence path)
+global function IsPathFile(sequence path)
         return c_func(xIsPathFile,{path})
 end function
 
-public function IsFileNameValid(sequence fName)
+global function IsFileNameValid(sequence fName)
         return c_func(xIsFileNameValid,{fName})
 end function
 
-public function LoadDirectoryFiles(sequence dirPath)
+global function LoadDirectoryFiles(sequence dirPath)
         return c_func(xLoadDirectoryFiles,{dirPath})
 end function
 
-public function LoadDirectoryFilesEx(sequence basePath,sequence filter,atom scanSubdirs)
+global function LoadDirectoryFilesEx(sequence basePath,sequence filter,atom scanSubdirs)
         return c_func(xLoadDirectoryFilesEx,{basePath,filter,scanSubdirs})
 end function
 
-public procedure UnloadDirectoryFiles(sequence files)
+global procedure UnloadDirectoryFiles(sequence files)
         c_proc(xUnloadDirectoryFiles,{files})
 end procedure
 
-public function IsFileDropped()
+global function IsFileDropped()
         return c_func(xIsFileDropped,{})
 end function
 
-public function LoadDroppedFiles()
+global function LoadDroppedFiles()
         return c_func(xLoadDroppedFiles,{})
 end function
 
-public procedure UnloadDroppedFiles(sequence files)
+global procedure UnloadDroppedFiles(sequence files)
         c_proc(xUnloadDroppedFiles,{files})
 end procedure
 
-public function GetFileModTime(sequence fName)
+global function GetFileModTime(sequence fName)
         return c_func(xGetFileModTime,{fName})
 end function
 
 --Compression functions
-public constant xCompressData = define_c_func(ray,"+CompressData",{C_POINTER,C_INT,C_POINTER},C_POINTER),
+constant xCompressData = define_c_func(ray,"+CompressData",{C_POINTER,C_INT,C_POINTER},C_POINTER),
                                 xDecompressData = define_c_func(ray,"+DecompressData",{C_POINTER,C_INT,C_POINTER},C_POINTER),
                                 xEncodeDataBase64 = define_c_func(ray,"+EncodeDataBase64",{C_POINTER,C_INT,C_POINTER},C_POINTER),
                                 xDecodeDataBase64 = define_c_func(ray,"+DecodeDataBase64",{C_POINTER,C_POINTER},C_POINTER),
@@ -1979,36 +2081,36 @@ public constant xCompressData = define_c_func(ray,"+CompressData",{C_POINTER,C_I
                                 xComputeMD5 = define_c_func(ray,"+ComputeMD5",{C_POINTER,C_INT},C_POINTER),
                                 xComputeSHA1 = define_c_func(ray,"+ComputeSHA1",{C_POINTER,C_INT},C_POINTER)
                                 
-public function CompressData(atom data,atom dataSize,atom compDataSize)
+global function CompressData(atom data,atom dataSize,atom compDataSize)
         return c_func(xCompressData,{data,dataSize,compDataSize})
 end function
 
-public function DecompressData(atom compData,atom compDataSize,atom dataSize)
+global function DecompressData(atom compData,atom compDataSize,atom dataSize)
         return c_func(xDecompressData,{compData,compDataSize,dataSize})
 end function
 
-public function EncodeDataBase64(atom data,atom dataSize,atom outputSize)
+global function EncodeDataBase64(atom data,atom dataSize,atom outputSize)
         return c_func(xEncodeDataBase64,{data,dataSize,outputSize})
 end function
 
-public function DecodeDataBase64(atom data,atom outputSize)
+global function DecodeDataBase64(atom data,atom outputSize)
         return c_func(xDecodeDataBase64,{data,outputSize})
 end function
 
-public function ComputeCRC32(atom data,atom dataSize)
+global function ComputeCRC32(atom data,atom dataSize)
         return c_func(xComputeCRC32,{data,dataSize})
 end function
 
-public function ComputeMD5(atom data,atom dataSize)
+global function ComputeMD5(atom data,atom dataSize)
         return c_func(xComputeMD5,{data,dataSize})
 end function
 
-public function ComputeSHA1(atom data,atom dataSize)
+global function ComputeSHA1(atom data,atom dataSize)
         return c_func(xComputeSHA1,{data,dataSize})
 end function
 
 --Automation event functions
-public constant xLoadAutomationEventList = define_c_func(ray,"+LoadAutomationEventList",{C_STRING},AutomationEventList),
+constant xLoadAutomationEventList = define_c_func(ray,"+LoadAutomationEventList",{C_STRING},AutomationEventList),
                                 xUnloadAutomationEventList = define_c_proc(ray,"+UnloadAutomationEventList",{AutomationEventList}),
                                 xExportAutomationEventList = define_c_func(ray,"+ExportAutomationEventList",{AutomationEventList,C_STRING},C_BOOL),
                                 xSetAutomationEventList = define_c_proc(ray,"+SetAutomationEventList",{C_POINTER}),
@@ -2017,40 +2119,40 @@ public constant xLoadAutomationEventList = define_c_func(ray,"+LoadAutomationEve
                                 xStopAutomationEventRecording = define_c_proc(ray,"+StopAutomationEventRecording",{}),
                                 xPlayAutomationEvent = define_c_proc(ray,"+PlayAutomationEvent",{AutomationEvent})
                                 
-public function LoadAutomationEventList(sequence fName)
+global function LoadAutomationEventList(sequence fName)
         return c_func(xLoadAutomationEventList,{fName})
 end function
 
-public procedure UnloadAutomationEventList(sequence list)
+global procedure UnloadAutomationEventList(sequence list)
         c_proc(xUnloadAutomationEventList,{list})
 end procedure
 
-public function ExportAutomationEventList(sequence list,sequence fName)
+global function ExportAutomationEventList(sequence list,sequence fName)
         return c_func(xExportAutomationEventList,{list,fName})
 end function
 
-public procedure SetAutomationEventList(atom list)
+global procedure SetAutomationEventList(atom list)
         c_proc(xSetAutomationEventList,{list})
 end procedure
 
-public procedure SetAutomationEventBaseFrame(atom frame)
+global procedure SetAutomationEventBaseFrame(atom frame)
         c_proc(xSetAutomationEventBaseFrame,{frame})
 end procedure
 
-public procedure StartAutomationEventRecording()
+global procedure StartAutomationEventRecording()
         c_proc(xStartAutomationEventRecording,{})
 end procedure
 
-public procedure StopAutomationEventRecording()
+global procedure StopAutomationEventRecording()
         c_proc(xStopAutomationEventRecording,{})
 end procedure
 
-public procedure PlayAutomationEvent(sequence event)
+global procedure PlayAutomationEvent(sequence event)
         c_proc(xPlayAutomationEvent,{event})
 end procedure
 
 --Input functions: Keyboard
-public constant xIsKeyPressed = define_c_func(ray,"+IsKeyPressed",{C_INT},C_BOOL),
+constant xIsKeyPressed = define_c_func(ray,"+IsKeyPressed",{C_INT},C_BOOL),
                                 xIsKeyPressedRepeat = define_c_func(ray,"+IsKeyPressedRepeat",{C_INT},C_BOOL),
                                 xIsKeyDown = define_c_func(ray,"+IsKeyDown",{C_INT},C_BOOL),
                                 xIsKeyReleased = define_c_func(ray,"+IsKeyReleased",{C_INT},C_BOOL),
@@ -2059,40 +2161,40 @@ public constant xIsKeyPressed = define_c_func(ray,"+IsKeyPressed",{C_INT},C_BOOL
                                 xGetCharPressed = define_c_func(ray,"+GetCharPressed",{},C_INT),
                                 xSetExitKey = define_c_proc(ray,"+SetExitKey",{C_INT})
                                 
-public function IsKeyPressed(atom key)
+global function IsKeyPressed(atom key)
         return and_bits(c_func(xIsKeyPressed,{key}),1)
 end function
 
-public function IsKeyPressedRepeat(atom key)
+global function IsKeyPressedRepeat(atom key)
         return and_bits(c_func(xIsKeyPressedRepeat,{key}),1)
 end function
 
-public function IsKeyDown(atom key)
+global function IsKeyDown(atom key)
         return and_bits(c_func(xIsKeyDown,{key}),1)
 end function
 
-public function IsKeyReleased(atom key)
+global function IsKeyReleased(atom key)
         return and_bits(c_func(xIsKeyReleased,{key}),1)
 end function
 
-public function IsKeyUp(atom key)
+global function IsKeyUp(atom key)
         return and_bits(c_func(xIsKeyUp,{key}),1)
 end function
 
-public function GetKeyPressed()
+global function GetKeyPressed()
         return c_func(xGetKeyPressed,{})
 end function
 
-public function GetCharPressed()
+global function GetCharPressed()
         return c_func(xGetCharPressed,{})
 end function
 
-public procedure SetExitKey(atom key)
+global procedure SetExitKey(atom key)
         c_proc(xSetExitKey,{key})
 end procedure
 
 --Input functions: Gamepad
-public constant xIsGamepadAvailable = define_c_func(ray,"+IsGamepadAvailable",{C_INT},C_BOOL),
+constant xIsGamepadAvailable = define_c_func(ray,"+IsGamepadAvailable",{C_INT},C_BOOL),
                                 xGetGamepadName = define_c_func(ray,"+GetGamepadName",{C_INT},C_STRING),
                                 xIsGamepadButtonPressed = define_c_func(ray,"+IsGamepadButtonPressed",{C_INT,C_INT},C_BOOL),
                                 xIsGamepadButtonDown = define_c_func(ray,"+IsGamepadButtonDown",{C_INT,C_INT},C_BOOL),
@@ -2104,54 +2206,54 @@ public constant xIsGamepadAvailable = define_c_func(ray,"+IsGamepadAvailable",{C
                                 xSetGamepadMappings = define_c_func(ray,"+SetGamepadMappings",{C_STRING},C_INT),
                                 xSetGamepadVibration = define_c_proc(ray,"+SetGamepadVibration",{C_INT,C_FLOAT,C_FLOAT,C_FLOAT})
                                 
-public function IsGamepadAvailable(atom gamepad)
+global function IsGamepadAvailable(atom gamepad)
         return and_bits(c_func(xIsGamepadAvailable,{gamepad}),1)
 end function
 
-public function GetGamepadName(atom gamepad)
+global function GetGamepadName(atom gamepad)
 atom pstr
         pstr = c_func(xGetGamepadName,{gamepad})
         return peek_string(pstr)
 end function
 
-public function IsGamepadButtonPressed(atom gamepad,atom button)
+global function IsGamepadButtonPressed(atom gamepad,atom button)
         return and_bits(c_func(xIsGamepadButtonPressed,{gamepad,button}),1)
 end function
 
-public function IsGamepadButtonDown(atom gamepad,atom button)
+global function IsGamepadButtonDown(atom gamepad,atom button)
         return and_bits(c_func(xIsGamepadButtonDown,{gamepad,button}),1)
 end function
 
-public function IsGamepadButtonReleased(atom gamepad,atom button)
+global function IsGamepadButtonReleased(atom gamepad,atom button)
         return and_bits(c_func(xIsGamepadButtonReleased,{gamepad,button}),1)
 end function
 
-public function IsGamepadButtonUp(atom gamepad,atom button)
+global function IsGamepadButtonUp(atom gamepad,atom button)
         return and_bits(c_func(xIsGamepadButtonUp,{gamepad,button}),1)
 end function
 
-public function GetGamepadButtonPressed()
+global function GetGamepadButtonPressed()
         return c_func(xGetGamepadButtonPressed,{})
 end function
 
-public function GetGamepadAxisCount(atom gamepad)
+global function GetGamepadAxisCount(atom gamepad)
         return c_func(xGetGamepadAxisCount,{gamepad})
 end function
 
-public function GetGamepadAxisMovement(atom gamepad,atom axis)
+global function GetGamepadAxisMovement(atom gamepad,atom axis)
         return c_func(xGetGamepadAxisMovement,{gamepad,axis})
 end function
 
-public function SetGamepadMappings(sequence mappings)
+global function SetGamepadMappings(sequence mappings)
         return c_func(xSetGamepadMappings,{mappings})
 end function
 
-public procedure SetGamepadVibration(atom gamepad,atom leftMotor,atom rightMotor,atom duration)
+global procedure SetGamepadVibration(atom gamepad,atom leftMotor,atom rightMotor,atom duration)
         c_proc(xSetGamepadVibration,{gamepad,leftMotor,rightMotor,duration})
 end procedure
 
 --Input functions: Mouse
-public constant xIsMouseButtonPressed = define_c_func(ray,"+IsMouseButtonPressed",{C_INT},C_BOOL),
+constant xIsMouseButtonPressed = define_c_func(ray,"+IsMouseButtonPressed",{C_INT},C_BOOL),
                                 xIsMouseButtonDown = define_c_func(ray,"+IsMouseButtonDown",{C_INT},C_BOOL),
                                 xIsMouseButtonReleased = define_c_func(ray,"+IsMouseButtonReleased",{C_INT},C_BOOL),
                                 xIsMouseButtonUp = define_c_func(ray,"+IsMouseButtonUp",{C_INT},C_BOOL),
@@ -2166,95 +2268,95 @@ public constant xIsMouseButtonPressed = define_c_func(ray,"+IsMouseButtonPressed
                                 xGetMouseWheelMoveV = define_c_func(ray,"+GetMouseWheelMoveV",{},Vector2),
                                 xSetMouseCursor = define_c_proc(ray,"+SetMouseCursor",{C_INT})
                                 
-public function IsMouseButtonPressed(atom button)   
+global function IsMouseButtonPressed(atom button)   
         --?c_func(xIsMouseButtonPressed,{button})
         return and_bits(c_func(xIsMouseButtonPressed,{button}),1)
         
 end function
 
-public function IsMouseButtonDown(atom button)
+global function IsMouseButtonDown(atom button)
         return and_bits(c_func(xIsMouseButtonDown,{button}),1)
 end function
 
-public function IsMouseButtonReleased(atom button)
+global function IsMouseButtonReleased(atom button)
         return and_bits(c_func(xIsMouseButtonReleased,{button}),1)
 end function
 
-public function IsMouseButtonUp(atom button)
+global function IsMouseButtonUp(atom button)
         return and_bits(c_func(xIsMouseButtonUp,{button}),1)
 end function
 
-public function GetMouseX()
+global function GetMouseX()
         return c_func(xGetMouseX,{})
 end function
 
-public function GetMouseY()
+global function GetMouseY()
         return c_func(xGetMouseY,{})
 end function
 
-public function GetMousePosition()
+global function GetMousePosition()
 sequence result
     result=RegtoV2(c_func(xGetMousePosition,{}))
 return result
 end function
 
-public function GetMouseDelta()
+global function GetMouseDelta()
         return RegtoV2(c_func(xGetMouseDelta,{}))
 end function
 
-public procedure SetMousePosition(atom x,atom y)
+global procedure SetMousePosition(atom x,atom y)
         c_proc(xSetMousePosition,{x,y})
 end procedure
 
-public procedure SetMouseOffset(atom x,atom y)
+global procedure SetMouseOffset(atom x,atom y)
         c_proc(xSetMouseOffset,{x,y})
 end procedure
 
-public procedure SetMouseScale(atom x,atom y)
+global procedure SetMouseScale(atom x,atom y)
         c_proc(xSetMouseScale,{x,y})
 end procedure
 
-public function GetMouseWheelMove()
+global function GetMouseWheelMove()
         return c_func(xGetMouseWheelMove,{})
 end function
 
-public function GetMouseWheelMoveV()
+global function GetMouseWheelMoveV()
         return RegtoV2(c_func(xGetMouseWheelMoveV,{}))
 end function
 
-public procedure SetMouseCursor(atom cursor)
+global procedure SetMouseCursor(atom cursor)
         c_proc(xSetMouseCursor,{cursor})
 end procedure
 
 --Input functions: Touch
-public constant xGetTouchX = define_c_func(ray,"+GetTouchX",{},C_INT),
+constant xGetTouchX = define_c_func(ray,"+GetTouchX",{},C_INT),
                                 xGetTouchY = define_c_func(ray,"+GetTouchY",{},C_INT),
                                 xGetTouchPosition = define_c_func(ray,"+GetTouchPosition",{C_INT},Vector2),
                                 xGetTouchPointId = define_c_func(ray,"+GetTouchPointId",{C_INT},C_INT),
                                 xGetTouchPointCount = define_c_func(ray,"+GetTouchPointCount",{},C_INT)
                                 
-public function GetTouchX()
+global function GetTouchX()
         return c_func(xGetTouchX,{})
 end function
 
-public function GetTouchY()
+global function GetTouchY()
         return c_func(xGetTouchY,{})
 end function
 
-public function GetTouchPosition(atom index)
+global function GetTouchPosition(atom index)
         return RegtoV2(c_func(xGetTouchPosition,{index}))
 end function
 
-public function GetTouchPointId(atom index)
+global function GetTouchPointId(atom index)
         return c_func(xGetTouchPointId,{index})
 end function
 
-public function GetTouchPointCount()
+global function GetTouchPointCount()
         return c_func(xGetTouchPointCount,{})
 end function
 
 --Gesture functions
-public constant xSetGesturesEnabled = define_c_proc(ray,"+SetGesturesEnabled",{C_UINT}),
+constant xSetGesturesEnabled = define_c_proc(ray,"+SetGesturesEnabled",{C_UINT}),
                                 xIsGestureDetected = define_c_func(ray,"+IsGestureDetected",{C_UINT},C_BOOL),
                                 xGetGestureDetected = define_c_func(ray,"+GetGestureDetected",{},C_INT),
                                 xGetGestureHoldDuration = define_c_func(ray,"+GetGestureHoldDuration",{},C_FLOAT),
@@ -2263,40 +2365,40 @@ public constant xSetGesturesEnabled = define_c_proc(ray,"+SetGesturesEnabled",{C
                                 xGetGesturePinchVector = define_c_func(ray,"+GetGesturePinchVector",{},Vector2),
                                 xGetGesturePinchAngle = define_c_func(ray,"+GetGesturePinchAngle",{},C_FLOAT)
                                 
-public procedure SetGesturesEnabled(atom flags)
+global procedure SetGesturesEnabled(atom flags)
         c_proc(xSetGesturesEnabled,{flags})
 end procedure
 
-public function IsGestureDetected(atom gesture)
+global function IsGestureDetected(atom gesture)
         return c_func(xIsGestureDetected,{gesture})
 end function
 
-public function GetGestureDetected()
+global function GetGestureDetected()
         return c_func(xGetGestureDetected,{})
 end function
 
-public function GetGestureHoldDuration()
+global function GetGestureHoldDuration()
         return c_func(xGetGestureHoldDuration,{})
 end function
 
-public function GetGestureDragVector()
+global function GetGestureDragVector()
         return RegtoV2(c_func(xGetGestureDragVector,{}))
 end function
 
-public function GetGestureDragAngle()
+global function GetGestureDragAngle()
         return c_func(xGetGestureDragAngle,{})
 end function
 
-public function GetGesturePinchVector()
+global function GetGesturePinchVector()
         return RegtoV2(c_func(xGetGesturePinchVector,{}))
 end function
 
-public function GetGesturePinchAngle()
+global function GetGesturePinchAngle()
         return c_func(xGetGesturePinchAngle,{})
 end function
 
 --Camera functions
-public constant xUpdateCamera = define_c_proc(ray,"+UpdateCamera",{C_POINTER,C_INT}),
+constant xUpdateCamera = define_c_proc(ray,"+UpdateCamera",{C_POINTER,C_INT}),
                                 xUpdateCameraPro = define_c_proc(ray,"+UpdateCameraPro",{C_POINTER,Vector3,Vector3,C_FLOAT})
                                 
 global function UpdateCamera(sequence  cam,atom mode)
@@ -2308,7 +2410,7 @@ free(camera)
 return camret
 end function
 
-public function UpdateCameraPro(sequence  cam,sequence movement,sequence rotation,atom zoom)
+global function UpdateCameraPro(sequence  cam,sequence movement,sequence rotation,atom zoom)
 atom camera=allocate(size_camera3d)
 sequence camret=Tcamera3D
 atom vec1=allocate(size_vector3)
@@ -2342,7 +2444,7 @@ constant xCameraYaw = define_c_proc(ray,"CameraYaw",{C_POINTER,C_FLOAT,C_BOOL}),
          xCameraPitch = define_c_proc(ray,"CameraPitch",{C_POINTER,C_FLOAT,C_BOOL,C_BOOL,C_BOOL}),
          xCameraRoll = define_c_proc(ray,"CameraRoll",{C_POINTER,C_FLOAT})
 
-public function CameraYaw(sequence cam,atom angle,atom rotate)
+global function CameraYaw(sequence cam,atom angle,atom rotate)
 atom camera=allocate(size_camera3d)
 sequence camret=Tcamera3D       
             c_proc(xCameraYaw,{poke_camera3d(camera,cam),angle,rotate})
@@ -2351,7 +2453,7 @@ free(camera)
 return camret        
 end function
 
-public function CameraPitch(sequence cam,atom angle,atom lock,atom rotate,atom rotateup)
+global function CameraPitch(sequence cam,atom angle,atom lock,atom rotate,atom rotateup)
 atom camera=allocate(size_camera3d)
 sequence camret=Tcamera3D
             c_proc(xCameraPitch,{poke_camera3d(camera,cam),angle,lock,rotate,rotateup})
@@ -2360,26 +2462,34 @@ free(camera)
 return camret
 end function
 
+global function CameraRoll(sequence cam,atom angle)
+atom camera=allocate(size_camera3d)
+sequence camret=Tcamera3D
+camret=peek_camera3d(camera)
+            c_proc(xCameraRoll,{poke_camera3d(camera,cam),angle})   
+free(camera)
+return camret
+end function
 
 --Shape functions
-public constant xSetShapesTexture = define_c_proc(ray,"+SetShapesTexture",{Texture2D,Rectangle}),
+constant xSetShapesTexture = define_c_proc(ray,"+SetShapesTexture",{Texture2D,Rectangle}),
                                 xGetShapesTexture = define_c_func(ray,"+GetShapesTexture",{},Texture2D),
                                 xGetShapesTextureRectangle = define_c_func(ray,"+GetShapesTextureRectangle",{},Rectangle)
                                 
-public procedure SetShapesTexture(sequence tex2D,sequence source)
+global procedure SetShapesTexture(sequence tex2D,sequence source)
         c_proc(xSetShapesTexture,{tex2D,source})
 end procedure
 
-public function GetShapesTexture()
+global function GetShapesTexture()
         return c_func(xGetShapesTexture,{})
 end function
 
-public function GetShapesTextureRectangle()
+global function GetShapesTextureRectangle()
         return c_func(xGetShapesTextureRectangle,{})
 end function
 
 --Basic shape drawing functions
-public constant xDrawPixel = define_c_proc(ray,"+DrawPixel",{C_INT,C_INT,C_Color}),
+constant xDrawPixel = define_c_proc(ray,"+DrawPixel",{C_INT,C_INT,C_Color}),
                                 xDrawPixelV = define_c_proc(ray,"+DrawPixelV",{Vector2,C_Color}),
                                 xDrawLine = define_c_proc(ray,"+DrawLine",{C_INT,C_INT,C_INT,C_INT,C_Color}),
                                 xDrawLineV = define_c_proc(ray,"+DrawLineV",{Vector2,Vector2,C_Color}),
@@ -2390,7 +2500,7 @@ public constant xDrawPixel = define_c_proc(ray,"+DrawPixel",{C_INT,C_INT,C_Color
                                 xDrawCircle = define_c_proc(ray,"+DrawCircle",{C_INT,C_INT,C_FLOAT,C_Color}),
                                 xDrawCircleSector = define_c_proc(ray,"+DrawCircleSector",{Vector2,C_FLOAT,C_FLOAT,C_FLOAT,C_INT,C_Color}),
                                 xDrawCircleSectorLines = define_c_proc(ray,"+DrawCircleSectorLines",{Vector2,C_FLOAT,C_FLOAT,C_FLOAT,C_INT,C_Color}),
-                                xDrawCircleGradient = define_c_proc(ray,"+DrawCircleGradient",{C_INT,C_INT,C_FLOAT,C_Color,C_Color}),
+                                xDrawCircleGradient = define_c_proc(ray,"+DrawCircleGradient",{Vector2,C_FLOAT,C_Color,C_Color}),
                                 xDrawCircleV = define_c_proc(ray,"+DrawCircleV",{Vector2,C_FLOAT,C_Color}),
                                 xDrawCircleLines = define_c_proc(ray,"+DrawCircleLines",{C_INT,C_INT,C_FLOAT,C_Color}),
                                 xDrawCircleLinesV = define_c_proc(ray,"+DrawCircleLinesV",{Vector2,C_FLOAT,C_Color}),
@@ -2419,30 +2529,35 @@ public constant xDrawPixel = define_c_proc(ray,"+DrawPixel",{C_INT,C_INT,C_Color
                                 xDrawPolyLinesEx = define_c_proc(ray,"+DrawPolyLinesEx",{Vector2,C_INT,C_FLOAT,C_FLOAT,C_FLOAT,C_Color})
                                 
 constant DrawPixel_=GetProcAddress(ray,"DrawPixel")
-global procedure _DrawPixel(integer x,integer y,sequence color)
+global procedure DrawPixel(integer x,integer y,sequence color)
 integer col=bytes_to_int(color)
 --/**/#ilASM{ 
 --/**/  [64]
+--/**/
 --/**/      mov rcx,[x]
 --/**/      mov rdx,[y]
 --/**/      mov r8,[col]
 --/**/      sub rsp, 40                 -- Shadow Space (32) + Alignment (8)
 --/**/      mov rax,[DrawPixel_]
 --/**/      call rax
---/**/  --  call "libraylib","DrawPixel"         -- Direkter Sprung
---/**/      add rsp, 40
+--/**/      --call "libraylib","DrawPixel"       -- Direkter Sprung
+--/**/      add rsp,40
+--/**/      [32]
+--/**/      nop 
 --/**/  }
 --/*
     c_proc(xDrawPixel,{x,y,col})
 --*/
 end procedure
 
-public procedure DrawPixel(integer x,integer  y,sequence color)
+global procedure _DrawPixel(integer x,integer  y,sequence color)
     c_proc(xDrawPixel,{x,y,bytes_to_int(color)})
 end procedure
 
+
+
 constant DrawPixelV_=GetProcAddress(ray,"DrawPixelV")
-global procedure _DrawPixelV(sequence pos,sequence color)
+global procedure DrawPixelV(sequence pos,sequence color)
 atom reg=V2toReg(pos)
 integer col=bytes_to_int(color)
 --/**/#ilASM{ 
@@ -2450,35 +2565,40 @@ integer col=bytes_to_int(color)
 --/**/      mov rax,[reg]
 --/**/      call :%pLoadMint    
 --/**/      mov rcx,rax  
+--/**/      mov rax,[DrawPixelV_]
 --/**/      mov rdx,[col]
 --/**/      sub rsp, 40                 -- Shadow Space (32) + Alignment (8)
---/**/      mov rax,[DrawPixelV_]
+--/**/  --  mov rax,[DrawPixelV_]
 --/**/      call rax
 --/**/  --  call "libraylib","DrawPixelV"        -- Direkter Sprung
---/**/      add rsp, 40
+--/**/      add rsp,40
+--/**/      [32]
+--/**/      nop
 --/**/  }
 --/*
     c_proc(xDrawPixelV,{reg,col})
 --*/
 end procedure
 
-public procedure DrawPixelV(sequence pos,sequence color)
+
+
+global procedure _DrawPixelV(sequence pos,sequence color)
         c_proc(xDrawPixelV,{V2toReg(pos),bytes_to_int(color)})
 end procedure
 
-public procedure DrawLine(atom startX,atom startY,atom endX,atom endY,sequence color)
+global procedure DrawLine(atom startX,atom startY,atom endX,atom endY,sequence color)
         c_proc(xDrawLine,{startX,startY,endX,endY,bytes_to_int(color)})
 end procedure
 
-public procedure DrawLineV(sequence start,sequence endPos,sequence color)
+global procedure DrawLineV(sequence start,sequence endPos,sequence color)
         c_proc(xDrawLineV,{V2toReg(start),V2toReg(endPos),bytes_to_int(color)})
 end procedure
 
-public procedure DrawLineEx(sequence start,sequence endPos,atom thick,sequence color)
+global procedure DrawLineEx(sequence start,sequence endPos,atom thick,sequence color)
         c_proc(xDrawLineEx,{V2toReg(start),V2toReg(endPos),thick,bytes_to_int(color)})
 end procedure
 
-public procedure DrawLineStrip(sequence pts,atom count,sequence color)
+global procedure DrawLineStrip(sequence pts,atom count,sequence color)
 atom buffer=allocate(length(pts)*2*8)
 for i= 0 to length(pts)-1
 do
@@ -2489,7 +2609,7 @@ end for
 free(buffer)
 end procedure
 
-public procedure DrawLineBezier(sequence start,sequence endPos,atom thick,sequence color)
+global procedure DrawLineBezier(sequence start,sequence endPos,atom thick,sequence color)
         c_proc(xDrawLineBezier,{V2toReg(start),V2toReg(endPos),thick,bytes_to_int(color)})
 end procedure
 
@@ -2497,59 +2617,59 @@ global procedure DrawLineDashed(sequence start,sequence endPos,atom dashsize,ato
         c_proc(xDrawLineDashed,{V2toReg(start),V2toReg(endPos),dashsize,spacesize,bytes_to_int(color)})
 end procedure
 
-public procedure DrawCircle(atom x,atom y,atom radius,sequence color)
+global procedure DrawCircle(atom x,atom y,atom radius,sequence color)
         c_proc(xDrawCircle,{x,y,radius,bytes_to_int(color)})
 end procedure
 
-public procedure DrawCircleSector(sequence center,atom radius,atom start,atom endAngle,atom segments,sequence color)
+global procedure DrawCircleSector(sequence center,atom radius,atom start,atom endAngle,atom segments,sequence color)
         c_proc(xDrawCircleSector,{V2toReg(center),radius,start,endAngle,segments,bytes_to_int(color)})
 end procedure
 
-public procedure DrawCircleSectorLines(sequence center,atom radius,atom start,atom endAngle,atom segments,sequence color)
+global procedure DrawCircleSectorLines(sequence center,atom radius,atom start,atom endAngle,atom segments,sequence color)
         c_proc(xDrawCircleSectorLines,{V2toReg(center),radius,start,endAngle,segments,bytes_to_int(color)})
 end procedure
 
-public procedure DrawCircleGradient(atom x,atom y,atom radius,sequence inner,sequence outer)
-        c_proc(xDrawCircleGradient,{x,y,radius,bytes_to_int(inner),bytes_to_int(outer)})
+global procedure DrawCircleGradient(sequence center,atom radius,sequence inner,sequence outer)
+        c_proc(xDrawCircleGradient,{V2toReg(center),radius,bytes_to_int(inner),bytes_to_int(outer)})
 end procedure
 
-public procedure DrawCircleV(sequence center,atom radius,sequence color)
+global procedure DrawCircleV(sequence center,atom radius,sequence color)
         c_proc(xDrawCircleV,{V2toReg(center),radius,bytes_to_int(color)})
 end procedure
 
-public procedure DrawCircleLines(atom x,atom y,atom radius,sequence color)
+global procedure DrawCircleLines(atom x,atom y,atom radius,sequence color)
         c_proc(xDrawCircleLines,{x,y,radius,bytes_to_int(color)})
 end procedure
 
-public procedure DrawCircleLinesV(sequence center,atom radius,sequence color)
+global procedure DrawCircleLinesV(sequence center,atom radius,sequence color)
         c_proc(xDrawCircleLinesV,{V2toReg(center),radius,bytes_to_int(color)})
 end procedure
 
-public procedure DrawEllipse(atom x,atom y,atom radH,atom radV,sequence color)
+global procedure DrawEllipse(atom x,atom y,atom radH,atom radV,sequence color)
         c_proc(xDrawEllipse,{x,y,radH,radV,bytes_to_int(color)})
 end procedure
 
-public procedure DrawEllipseLines(atom x,atom y,atom radH,atom radV,sequence color)
+global procedure DrawEllipseLines(atom x,atom y,atom radH,atom radV,sequence color)
         c_proc(xDrawEllipseLines,{x,y,radH,radV,bytes_to_int(color)})
 end procedure
 
-public procedure DrawRing(sequence center,atom innerRad,atom outerRad,atom start,atom endAngle,atom segments,sequence color)
+global procedure DrawRing(sequence center,atom innerRad,atom outerRad,atom start,atom endAngle,atom segments,sequence color)
         c_proc(xDrawRing,{V2toReg(center),innerRad,outerRad,start,endAngle,segments,bytes_to_int(color)})
 end procedure
 
-public procedure DrawRingLines(sequence center,atom innerRad,atom outerRad,atom start,atom endAngle,atom segments,sequence color)
+global procedure DrawRingLines(sequence center,atom innerRad,atom outerRad,atom start,atom endAngle,atom segments,sequence color)
         c_proc(xDrawRingLines,{V2toReg(center),innerRad,outerRad,start,endAngle,segments,bytes_to_int(color)})
 end procedure
 
-public procedure DrawRectangle(atom x,atom y,atom width,atom height,sequence color)
+global procedure DrawRectangle(atom x,atom y,atom width,atom height,sequence color)
         c_proc(xDrawRectangle,{x,y,width,height,bytes_to_int(color)})
 end procedure
 
-public procedure DrawRectangleV(sequence pos,sequence size,sequence color)
+global procedure DrawRectangleV(sequence pos,sequence size,sequence color)
         c_proc(xDrawRectangleV,{V2toReg(pos),V2toReg(size),bytes_to_int(color)})
 end procedure
 
-public procedure DrawRectangleRec(sequence rec,sequence color)
+global procedure DrawRectangleRec(sequence rec,sequence color)
 atom mem=allocate(20)
 poke(mem,atom_to_float32(rec[1]))
 poke(mem+4,atom_to_float32(rec[2]))
@@ -2559,7 +2679,7 @@ poke(mem+12,atom_to_float32(rec[4]))
 free(mem)
 end procedure
 
-public procedure DrawRectanglePro(sequence rec,sequence origin,atom rotation,sequence color)
+global procedure DrawRectanglePro(sequence rec,sequence origin,atom rotation,sequence color)
 atom mem=allocate(20)
 poke(mem,atom_to_float32(rec[1]))
 poke(mem+4,atom_to_float32(rec[2]))
@@ -2569,15 +2689,15 @@ poke(mem+12,atom_to_float32(rec[4]))
 free(mem)
 end procedure
 
-public procedure DrawRectangleGradientV(atom x,atom y,atom width,atom height,sequence top,sequence bottom)
+global procedure DrawRectangleGradientV(atom x,atom y,atom width,atom height,sequence top,sequence bottom)
         c_proc(xDrawRectangleGradientV,{x,y,width,height,bytes_to_int(top),bytes_to_int(bottom)})
 end procedure
 
-public procedure DrawRectangleGradientH(atom x,atom y,atom width,atom height,sequence left,sequence right)
+global procedure DrawRectangleGradientH(atom x,atom y,atom width,atom height,sequence left,sequence right)
         c_proc(xDrawRectangleGradientH,{x,y,width,height,bytes_to_int(left),bytes_to_int(right)})
 end procedure
 
-public procedure DrawRectangleGradientEx(sequence rec,sequence topLeft,sequence bottomLeft,sequence topRight,sequence bottomRight)
+global procedure DrawRectangleGradientEx(sequence rec,sequence topLeft,sequence bottomLeft,sequence topRight,sequence bottomRight)
 atom mem=allocate(20)
 poke(mem,atom_to_float32(rec[1]))
 poke(mem+4,atom_to_float32(rec[2]))
@@ -2587,11 +2707,11 @@ poke(mem+12,atom_to_float32(rec[4]))
 free(mem)
 end procedure
 
-public procedure DrawRectangleLines(atom x,atom y,atom width,atom height,sequence color)
+global procedure DrawRectangleLines(atom x,atom y,atom width,atom height,sequence color)
         c_proc(xDrawRectangleLines,{x,y,width,height,bytes_to_int(color)})
 end procedure
 
-public procedure DrawRectangleLinesEx(sequence rec,atom thick,sequence color)
+global procedure DrawRectangleLinesEx(sequence rec,atom thick,sequence color)
 atom mem=allocate(20)
 poke(mem,atom_to_float32(rec[1]))
 poke(mem+4,atom_to_float32(rec[2]))
@@ -2601,7 +2721,7 @@ poke(mem+12,atom_to_float32(rec[4]))
 free(mem)
 end procedure
 
-public procedure DrawRectangleRounded(sequence rec,atom _round,atom segments,sequence color)
+global procedure DrawRectangleRounded(sequence rec,atom _round,atom segments,sequence color)
 atom mem=allocate(20)
 poke(mem,atom_to_float32(rec[1]))
 poke(mem+4,atom_to_float32(rec[2]))
@@ -2611,7 +2731,7 @@ poke(mem+12,atom_to_float32(rec[4]))
 free(mem)
 end procedure
 
-public procedure DrawRectangleRoundedLines(sequence rec,atom _round,atom segments,sequence color)
+global procedure DrawRectangleRoundedLines(sequence rec,atom _round,atom segments,sequence color)
 atom mem=allocate(20)
 poke(mem,atom_to_float32(rec[1]))
 poke(mem+4,atom_to_float32(rec[2]))
@@ -2621,7 +2741,7 @@ poke(mem+12,atom_to_float32(rec[4]))
 free(mem)
 end procedure
 
-public procedure DrawRectangleRoundedLinesEx(sequence rec,atom _round,atom segments,atom thick,sequence color)
+global procedure DrawRectangleRoundedLinesEx(sequence rec,atom _round,atom segments,atom thick,sequence color)
 atom mem=allocate(20)
 poke(mem,atom_to_float32(rec[1]))
 poke(mem+4,atom_to_float32(rec[2]))
@@ -2631,15 +2751,15 @@ poke(mem+12,atom_to_float32(rec[4]))
 free(mem)
 end procedure
 
-public procedure DrawTriangle(sequence v,sequence v2,sequence v3,sequence color)
+global procedure DrawTriangle(sequence v,sequence v2,sequence v3,sequence color)
         c_proc(xDrawTriangle,{V2toReg(v),V2toReg(v2),V2toReg(v3),bytes_to_int(color)})
 end procedure
 
-public procedure DrawTriangleLines(sequence v,sequence v2,sequence v3,sequence color)
+global procedure DrawTriangleLines(sequence v,sequence v2,sequence v3,sequence color)
         c_proc(xDrawTriangleLines,{V2toReg(v),V2toReg(v2),V2toReg(v3),bytes_to_int(color)})
 end procedure
 
-public procedure DrawTriangleFan(sequence  pts,atom count,sequence color)
+global procedure DrawTriangleFan(sequence  pts,atom count,sequence color)
 atom buffer=allocate(length(pts)*2*8)
 for i= 0 to length(pts)-1
 do
@@ -2650,7 +2770,7 @@ end for
 free(buffer)
 end procedure
 
-public procedure DrawTriangleStrip(sequence  pts,atom count,sequence color)
+global procedure DrawTriangleStrip(sequence  pts,atom count,sequence color)
 atom buffer=allocate(length(pts)*2*8)
 for i= 0 to length(pts)-1
 do
@@ -2661,20 +2781,20 @@ end for
 free(buffer)
 end procedure
 
-public procedure DrawPoly(sequence center,atom sides,atom radius,atom rotation,sequence color)
+global procedure DrawPoly(sequence center,atom sides,atom radius,atom rotation,sequence color)
         c_proc(xDrawPoly,{V2toReg(center),sides,radius,rotation,bytes_to_int(color)})
 end procedure
 
-public procedure DrawPolyLines(sequence center,atom sides,atom radius,atom rotation,sequence color)
+global procedure DrawPolyLines(sequence center,atom sides,atom radius,atom rotation,sequence color)
         c_proc(xDrawPolyLines,{V2toReg(center),sides,radius,rotation,bytes_to_int(color)})
 end procedure
 
-public procedure DrawPolyLinesEx(sequence center,atom sides,atom radius,atom rotation,atom thick,sequence color)
+global procedure DrawPolyLinesEx(sequence center,atom sides,atom radius,atom rotation,atom thick,sequence color)
         c_proc(xDrawPolyLinesEx,{V2toReg(center),sides,radius,rotation,thick,bytes_to_int(color)})
 end procedure
 
 --Spline drawing functions
-public constant xDrawSplineLinear = define_c_proc(ray,"+DrawSplineLinear",{C_POINTER,C_INT,C_FLOAT,C_Color}),
+constant xDrawSplineLinear = define_c_proc(ray,"+DrawSplineLinear",{C_POINTER,C_INT,C_FLOAT,C_Color}),
                                 xDrawSplineBasis = define_c_proc(ray,"+DrawSplineBasis",{C_POINTER,C_INT,C_FLOAT,C_Color}),
                                 xDrawSplineCatmullRom = define_c_proc(ray,"+DrawSplineCatmullRom",{C_POINTER,C_INT,C_FLOAT,C_Color}),
                                 xDrawSplineBezierQuadratic = define_c_proc(ray,"+DrawSplineBezierQuadratic",{C_POINTER,C_INT,C_FLOAT,C_Color}),
@@ -2685,7 +2805,7 @@ public constant xDrawSplineLinear = define_c_proc(ray,"+DrawSplineLinear",{C_POI
                                 xDrawSplineSegmentBezierQuadratic = define_c_proc(ray,"+DrawSplineSegmentBezierQuadratic",{Vector2,Vector2,Vector2,C_FLOAT,C_Color}),
                                 xDrawSplineSegmentBezierCubic = define_c_proc(ray,"+DrawSplineSegmentBezierCubic",{Vector2,Vector2,Vector2,Vector2,C_FLOAT,C_Color})
                                 
-public procedure DrawSplineLinear(sequence pts,atom count,atom thick,sequence color)
+global procedure DrawSplineLinear(sequence pts,atom count,atom thick,sequence color)
 atom buffer=allocate(length(pts)*2*8)
 for i= 0 to length(pts)-1
 do
@@ -2696,71 +2816,71 @@ end for
 free(buffer)    
 end procedure
 
-public procedure DrawSplineBasis(atom pts,atom count,atom thick,sequence color)
+global procedure DrawSplineBasis(atom pts,atom count,atom thick,sequence color)
         c_proc(xDrawSplineBasis,{pts,count,thick,color})
 end procedure
 
-public procedure DrawSplineCatmullRom(atom pts,atom count,atom thick,sequence color)
+global procedure DrawSplineCatmullRom(atom pts,atom count,atom thick,sequence color)
         c_proc(xDrawSplineCatmullRom,{pts,count,thick,color})
 end procedure
 
-public procedure DrawSplineBezierQuadratic(atom pts,atom count,atom thick,sequence color)
+global procedure DrawSplineBezierQuadratic(atom pts,atom count,atom thick,sequence color)
         c_proc(xDrawSplineBezierQuadratic,{pts,count,thick,color})
 end procedure
 
-public procedure DrawSplineBezierCubic(atom pts,atom count,atom thick,sequence color)
+global procedure DrawSplineBezierCubic(atom pts,atom count,atom thick,sequence color)
         c_proc(xDrawSplineBezierCubic,{pts,count,thick,color})
 end procedure
 
-public procedure DrawSplineSegmentLinear(sequence p1,sequence p2,atom thick,sequence color)
+global procedure DrawSplineSegmentLinear(sequence p1,sequence p2,atom thick,sequence color)
         c_proc(xDrawSplineSegmentLinear,{p1,p2,thick,color})
 end procedure
 
-public procedure DrawSplineSegmentBasis(sequence p1,sequence p2,sequence p3,sequence p4,atom thick,sequence color)
+global procedure DrawSplineSegmentBasis(sequence p1,sequence p2,sequence p3,sequence p4,atom thick,sequence color)
         c_proc(xDrawSplineSegmentBasis,{p1,p2,p3,p4,thick,color})
 end procedure
 
-public procedure DrawSplineSegmentCatmullRom(sequence p1,sequence p2,sequence p3,sequence p4,atom thick,sequence color)
+global procedure DrawSplineSegmentCatmullRom(sequence p1,sequence p2,sequence p3,sequence p4,atom thick,sequence color)
         c_proc(xDrawSplineSegmentCatmullRom,{p1,p2,p3,p4,thick,color})
 end procedure
 
-public procedure DrawSplineSegmentBezierQuadratic(sequence p1,sequence p2,sequence p3,atom thick,sequence color)
+global procedure DrawSplineSegmentBezierQuadratic(sequence p1,sequence p2,sequence p3,atom thick,sequence color)
         c_proc(xDrawSplineSegmentBezierQuadratic,{p1,p2,p3,thick,color})
 end procedure
 
-public procedure DrawSplineSegmentBezierCubic(sequence p1,sequence c2, sequence c3,sequence p4,atom thick,sequence color)
+global procedure DrawSplineSegmentBezierCubic(sequence p1,sequence c2, sequence c3,sequence p4,atom thick,sequence color)
         c_proc(xDrawSplineSegmentBezierCubic,{p1,c2,c3,p4,thick,color})
 end procedure
 
 --Spline segment point evaluation functions
-public constant xGetSplinePointLinear = define_c_func(ray,"+GetSplinePointLinear",{Vector2,Vector2,C_FLOAT},Vector2),
+global constant xGetSplinePointLinear = define_c_func(ray,"+GetSplinePointLinear",{Vector2,Vector2,C_FLOAT},Vector2),
                                 xGetSplinePointBasis = define_c_func(ray,"+GetSplinePointBasis",{Vector2,Vector2,Vector2,Vector2,C_FLOAT},Vector2),
                                 xGetSplinePointCatmullRom = define_c_func(ray,"+GetSplinePointCatmullRom",{Vector2,Vector2,Vector2,Vector2,C_FLOAT},Vector2),
                                 xGetSplinePointBezierQuad = define_c_func(ray,"+GetSplinePointBezierQuad",{Vector2,Vector2,Vector2,C_FLOAT},Vector2),
                                 xGetSplinePointBezierCubic = define_c_func(ray,"+GetSplinePointBezierCubic",{Vector2,Vector2,Vector2,Vector2,C_FLOAT},Vector2)
                                 
-public function GetSplinePointLinear(sequence start,sequence endPos,atom t)
+global function GetSplinePointLinear(sequence start,sequence endPos,atom t)
         return c_func(xGetSplinePointLinear,{start,endPos,t})
 end function
 
-public function GetSplinePointBasis(sequence p1,sequence p2,sequence p3,sequence p4,atom t)
+global function GetSplinePointBasis(sequence p1,sequence p2,sequence p3,sequence p4,atom t)
         return c_func(xGetSplinePointBasis,{p1,p2,p3,p4,t})
 end function
 
-public function GetSplinePointCatmullRom(sequence p1,sequence p2,sequence p3,sequence p4,atom t)
+global function GetSplinePointCatmullRom(sequence p1,sequence p2,sequence p3,sequence p4,atom t)
         return c_func(xGetSplinePointCatmullRom,{p1,p2,p3,p4,t})
 end function
 
-public function GetSplinePointBezierQuad(sequence p1,sequence c2,sequence p3,atom t)
+global function GetSplinePointBezierQuad(sequence p1,sequence c2,sequence p3,atom t)
         return c_func(xGetSplinePointBezierQuad,{p1,c2,p3,t})
 end function
 
-public function GetSplinePointBezierCubic(sequence p1,sequence c2,sequence c3,sequence p4,atom t)
+global function GetSplinePointBezierCubic(sequence p1,sequence c2,sequence c3,sequence p4,atom t)
         return c_func(xGetSplinePointBezierCubic,{p1,c2,c3,p4,t})
 end function
 
 --Shape collision detection functions
-public constant xCheckCollisionRecs = define_c_func(ray,"+CheckCollisionRecs",{Rectangle,Rectangle},C_BOOL),
+constant xCheckCollisionRecs = define_c_func(ray,"+CheckCollisionRecs",{Rectangle,Rectangle},C_BOOL),
                                 xCheckCollisionCircles = define_c_func(ray,"+CheckCollisionCircles",{Vector2,C_FLOAT,Vector2,C_FLOAT},C_BOOL),
                                 xCheckCollisionCircleRec = define_c_func(ray,"+CheckCollisionCircleRec",{Vector2,C_FLOAT,Rectangle},C_BOOL),
                                 xCheckCollisionCircleLine = define_c_func(ray,"+CheckCollisionCircleLine",{Vector2,C_FLOAT,Vector2,Vector2},C_BOOL),
@@ -2772,7 +2892,7 @@ public constant xCheckCollisionRecs = define_c_func(ray,"+CheckCollisionRecs",{R
                                 xCheckCollisionLines = define_c_func(ray,"+CheckCollisionLines",{Vector2,Vector2,Vector2,Vector2,C_POINTER},C_BOOL),
                                 xGetCollisionRec = define_c_func(ray,"+GetCollisionRec",{C_HPTR,Rectangle,Rectangle},Rectangle)
                                 
-public function CheckCollisionRecs(sequence rec,sequence rec2)
+global function CheckCollisionRecs(sequence rec,sequence rec2)
 atom memA=allocate(20)
 poke(memA,atom_to_float32(rec[1]))
 poke(memA+4,atom_to_float32(rec[2]))
@@ -2790,21 +2910,21 @@ free(memB)
 return erg
 end function
 
-public function CheckCollisionCircles(sequence center,atom rad,sequence center2,atom rad2)
+global function CheckCollisionCircles(sequence center,atom rad,sequence center2,atom rad2)
         return c_func(xCheckCollisionCircles,{V2toReg(center),rad,V2toReg(center2),rad2})
 end function
 
-public function CheckCollisionCircleRec(sequence center,atom rad,sequence rec)
+global function CheckCollisionCircleRec(sequence center,atom rad,sequence rec)
 atom mem=allocate(size_rectangle)
-        return c_func(xCheckCollisionCircleRec,{V2toReg(center),rad,poke_rectangle(mem,rec)})
+        return and_bits(c_func(xCheckCollisionCircleRec,{V2toReg(center),rad,poke_rectangle(mem,rec)}),1)
 free(mem)
 end function
 
-public function CheckCollisionCircleLine(sequence center,atom rad,sequence p1,sequence p2)
+global function CheckCollisionCircleLine(sequence center,atom rad,sequence p1,sequence p2)
         return c_func(xCheckCollisionCircleLine,{V2toReg(center),rad,V2toReg(p1),V2toReg(p2)})
 end function
 
-public function CheckCollisionPointRec(sequence point,sequence rec)
+global function CheckCollisionPointRec(sequence point,sequence rec)
 atom mem=allocate(16)
 atom result=0
 poke(mem,atom_to_float32(rec[1]))
@@ -2816,27 +2936,27 @@ free(mem)
 return result
 end function
 
-public function CheckCollisionPointCircle(sequence point,sequence center,atom rad)
+global function CheckCollisionPointCircle(sequence point,sequence center,atom rad)
         return and_bits(c_func(xCheckCollisionPointCircle,{V2toReg(point),V2toReg(center),rad}),1)
 end function
 
-public function CheckCollisionPointTriangle(sequence point,sequence p1,sequence p2,sequence p3)
+global function CheckCollisionPointTriangle(sequence point,sequence p1,sequence p2,sequence p3)
         return c_func(xCheckCollisionPointTriangle,{V2toReg(point),V2toReg(p1),V2toReg(p2),V2toReg(p3)})
 end function
 
-public function CheckCollisionPointLine(sequence point,sequence p1,sequence p2,atom threshold)
+global function CheckCollisionPointLine(sequence point,sequence p1,sequence p2,atom threshold)
         return c_func(xCheckCollisionPointLine,{V2toReg(point),V2toReg(p1),V2toReg(p2),threshold})
 end function
 
-public function CheckCollisionPointPoly(sequence point,atom points,atom count)
+global function CheckCollisionPointPoly(sequence point,atom points,atom count)
         return c_func(xCheckCollisionPointPoly,{V2toReg(point),points,count})
 end function
 
-public function CheckCollisionLines(sequence start,sequence endpos,sequence start2,sequence pos2,atom cpoint)
+global function CheckCollisionLines(sequence start,sequence endpos,sequence start2,sequence pos2,atom cpoint)
         return c_func(xCheckCollisionLines,{V2toReg(start),V2toReg(endpos),V2toReg(start2),V2toReg(pos2),cpoint})
 end function
 
-public function GetCollisionRec(sequence rec,sequence rec2)
+global function GetCollisionRec(sequence rec,sequence rec2)
 atom memA=allocate(20)
 poke(memA,atom_to_float32(rec[1]))
 poke(memA+4,atom_to_float32(rec[2]))
@@ -2865,7 +2985,7 @@ return result
 end function
 
 --Image loading functions
-public constant xLoadImage = define_c_func(ray,"+LoadImage",{C_HPTR,C_STRING},Image),
+global constant xLoadImage = define_c_func(ray,"+LoadImage",{C_HPTR,C_STRING},Image),
                                 xLoadImageRaw = define_c_func(ray,"+LoadImageRaw",{C_STRING,C_INT,C_INT,C_INT,C_INT},Image),
                                 xLoadImageAnim = define_c_func(ray,"+LoadImageAnim",{C_HPTR,C_STRING,C_POINTER},Image),
                                 xLoadImageAnimFromMemory = define_c_func(ray,"+LoadImageAnimFromMemory",{C_STRING,C_POINTER,C_INT,C_POINTER},Image),
@@ -2878,7 +2998,7 @@ public constant xLoadImage = define_c_func(ray,"+LoadImage",{C_HPTR,C_STRING},Im
                                 xExportImageToMemory = define_c_func(ray,"+ExportImageToMemory",{Image,C_STRING,C_POINTER},C_POINTER),
                                 xExportImageAsCode = define_c_func(ray,"+ExportImageAsCode",{Image,C_STRING},C_BOOL)
                                 
-public function LoadImage(sequence fName)
+global function LoadImage(sequence fName)
 atom mem=allocate(24)
 atom pstr=allocate_string(fName)
 sequence result={0,0,0,0,0}
@@ -2895,11 +3015,11 @@ free(pstr)
 return result
 end function
 
-public function LoadImageRaw(sequence fName,atom width,atom height,atom format,atom headerSize)
+global function LoadImageRaw(sequence fName,atom width,atom height,atom format,atom headerSize)
         return c_func(xLoadImageRaw,{fName,width,height,format,headerSize})
 end function
 
-public function LoadImageAnim(sequence fName,atom frames) --frames need to be a pointer to int
+global function LoadImageAnim(sequence fName,atom frames) --frames need to be a pointer to int
 atom mem=allocate(24)
 atom pstr=allocate_string(fName)
 sequence result={0,0,0,0,0}
@@ -2916,23 +3036,23 @@ free(pstr)
 return result
 end function
 
-public function LoadImageAnimFromMemory(sequence fileType,atom fileData,atom dataSize,atom frames)
+global function LoadImageAnimFromMemory(sequence fileType,atom fileData,atom dataSize,atom frames)
         return c_func(xLoadImageAnimFromMemory,{fileType,fileData,dataSize,frames})
 end function
 
-public function LoadImageFromMemory(sequence fileType,atom fileData,atom dataSize)
+global function LoadImageFromMemory(sequence fileType,atom fileData,atom dataSize)
         return c_func(xLoadImageFromMemory,{fileType,fileData,dataSize})
 end function
 
-public function LoadImageFromTexture(sequence tex)
+global function LoadImageFromTexture(sequence tex)
         return c_func(xLoadImageFromTexture,{tex})
 end function
 
-public function LoadImageFromScreen()
+global function LoadImageFromScreen()
         return c_func(xLoadImageFromScreen,{})
 end function
 
-public function IsImageValid(sequence image)
+global function IsImageValid(sequence image)
 atom addr=allocate(size_image)
 integer result=0
         result= c_func(xIsImageValid,{poke_image(addr,image)})
@@ -2940,7 +3060,7 @@ free(addr)
 return result
 end function
 
-public procedure UnloadImage(sequence image)
+global procedure UnloadImage(sequence image)
 atom mem=allocate(24)
 poke8(mem,image[1])
 poke4(mem+8,image[2])
@@ -2951,20 +3071,20 @@ poke4(mem+20,image[5])
 free(mem)
 end procedure
 
-public function ExportImage(sequence image,sequence fName)
+global function ExportImage(sequence image,sequence fName)
         return c_func(xExportImage,{image,fName})
 end function
 
-public function ExportImageToMemory(sequence image,sequence fileType,atom fileSize)
+global function ExportImageToMemory(sequence image,sequence fileType,atom fileSize)
         return c_func(xExportImageToMemory,{image,fileType,fileSize})
 end function
 
-public function ExportImageAsCode(sequence image,sequence fName)
+global function ExportImageAsCode(sequence image,sequence fName)
         return c_func(xExportImageAsCode,{image,fName})
 end function
 
 --Image generation functions
-public constant xGenImageColor = define_c_func(ray,"+GenImageColor",{C_HPTR,C_INT,C_INT,C_Color},Image),
+constant xGenImageColor = define_c_func(ray,"+GenImageColor",{C_HPTR,C_INT,C_INT,C_Color},Image),
                                 xGenImageGradientLinear = define_c_func(ray,"+GenImageGradientLinear",{C_HPTR,C_INT,C_INT,C_INT,C_Color,C_Color},Image),
                                 xGenImageGradientRadial = define_c_func(ray,"+GenImageGradientRadial",{C_HPTR,C_INT,C_INT,C_FLOAT,C_Color,C_Color},Image),
                                 xGenImageGradientSquare = define_c_func(ray,"+GenImageGradientSquare",{C_HPTR,C_INT,C_INT,C_FLOAT,C_Color,C_Color},Image),
@@ -2974,7 +3094,7 @@ public constant xGenImageColor = define_c_func(ray,"+GenImageColor",{C_HPTR,C_IN
                                 xGenImageCellular = define_c_func(ray,"+GenImageCellular",{C_HPTR,C_INT,C_INT,C_INT},Image),
                                 xGenImageText = define_c_func(ray,"+GenImageText",{C_HPTR,C_INT,C_INT,C_STRING},Image)
                                 
-public function GenImageColor(atom width,atom height,sequence color)
+global function GenImageColor(atom width,atom height,sequence color)
 atom mem=allocate(24)
 atom ptr
 sequence result={0,0,0,0,0}
@@ -2988,7 +3108,7 @@ free(mem)
 return result
 end function
 
-public function GenImageGradientLinear(atom width,atom height,atom direction,sequence start,sequence cend)
+global function GenImageGradientLinear(atom width,atom height,atom direction,sequence start,sequence cend)
 atom mem=allocate(24)
 atom ptr
 sequence result={0,0,0,0,0}
@@ -3002,7 +3122,7 @@ free(mem)
 return result       
 end function
 
-public function GenImageGradientRadial(atom width,atom height,atom density,sequence inner,sequence outer)
+global function GenImageGradientRadial(atom width,atom height,atom density,sequence inner,sequence outer)
 atom mem=allocate(24)
 atom ptr
 sequence result={0,0,0,0,0}
@@ -3016,7 +3136,7 @@ free(mem)
 return result
 end function
 
-public function GenImageGradientSquare(atom width,atom height,atom density,sequence inner,sequence outer)
+global function GenImageGradientSquare(atom width,atom height,atom density,sequence inner,sequence outer)
 atom mem=allocate(24)
 atom ptr
 sequence result={0,0,0,0,0}
@@ -3030,7 +3150,7 @@ free(mem)
 return result   
 end function
 
-public function GenImageChecked(atom width,atom height,atom x,atom y,sequence col,sequence col2)
+global function GenImageChecked(atom width,atom height,atom x,atom y,sequence col,sequence col2)
 atom mem=allocate(24)
 atom ptr
 sequence result={0,0,0,0,0}
@@ -3044,7 +3164,7 @@ free(mem)
 return result
 end function
 
-public function GenImageWhiteNoise(atom width,atom height,atom factor)
+global function GenImageWhiteNoise(atom width,atom height,atom factor)
 atom mem=allocate(24)
 atom ptr
 sequence result={0,0,0,0,0}
@@ -3058,7 +3178,7 @@ free(mem)
 return result       
 end function
 
-public function GenImagePerlinNoise(atom width,atom height,atom x,atom y,atom scale)
+global function GenImagePerlinNoise(atom width,atom height,atom x,atom y,atom scale)
 atom mem=allocate(24)
 atom ptr
 sequence result={0,0,0,0,0}
@@ -3072,7 +3192,7 @@ free(mem)
 return result
 end function
 
-public function GenImageCellular(atom width,atom height,atom tileSize)
+global function GenImageCellular(atom width,atom height,atom tileSize)
 atom mem=allocate(24)
 atom ptr
 sequence result={0,0,0,0,0}
@@ -3086,7 +3206,7 @@ free(mem)
 return result
 end function
 
-public function GenImageText(atom width,atom height,sequence text)
+global function GenImageText(atom width,atom height,sequence text)
 atom mem=allocate(24)
 atom pstr=allocate_string(text)
 atom ptr
@@ -3103,8 +3223,8 @@ return result
 end function
 
 --Image manipulation functions
-public constant xImageCopy = define_c_func(ray,"+ImageCopy",{Image},Image),
-                                xImageFromImage = define_c_func(ray,"+ImageFromImage",{Image,Rectangle},Image),
+constant xImageCopy = define_c_func(ray,"+ImageCopy",{C_HPTR,Image},Image),
+                                xImageFromImage = define_c_func(ray,"+ImageFromImage",{C_HPTR,Image,Rectangle},Image),
                                 xImageFromChannel = define_c_func(ray,"+ImageFromChannel",{Image,C_INT},Image),
                                 xImageText = define_c_func(ray,"+ImageText",{C_STRING,C_INT,C_Color},Image),
                                 xImageTextEx = define_c_func(ray,"+ImageTextEx",{Font,C_STRING,C_FLOAT,C_FLOAT,C_Color},Image),
@@ -3140,152 +3260,195 @@ public constant xImageCopy = define_c_func(ray,"+ImageCopy",{Image},Image),
                                 xGetImageAlphaBorder = define_c_func(ray,"+GetImageAlphaBorder",{Image,C_FLOAT},Rectangle),
                                 xGetImageColor = define_c_func(ray,"+GetImageColor",{Image,C_INT,C_INT},C_Color)
                                 
-public function ImageCopy(sequence image)
-        return c_func(xImageCopy,{image})
+global function ImageCopy(sequence image)
+atom mem=allocate(size_image)
+atom img=allocate(size_image)
+atom ptr
+        ptr = c_func(xImageCopy,{mem,poke_image(img,image)})
+sequence result=peek_image(ptr)
+free(mem)
+free(img)
+return result
 end function
 
-public function ImageFromImage(sequence image,sequence rec)
-        return c_func(xImageFromImage,{image,rec})
+global function ImageFromImage(sequence image,sequence rec)
+atom mem=allocate(size_image)
+atom rect=allocate(size_rectangle)
+atom ptr
+sequence result
+        ptr = c_func(xImageFromImage,{mem,poke_image(mem,image),poke_rectangle(rect,rec)})
+        result=peek_image(ptr)
+free(rect)
+free(mem)
+return (result)
 end function
 
-public function ImageFromChannel(sequence image,atom selectChannel)
+global function ImageFromChannel(sequence image,atom selectChannel)
         return c_func(xImageFromChannel,{image,selectChannel})
 end function
 
-public function ImageText(sequence text,atom fontSize,sequence color)
+global function ImageText(sequence text,atom fontSize,sequence color)
         return c_func(xImageText,{text,fontSize,color})
 end function
 
-public function ImageTextEx(sequence font,sequence text,atom fontSize,atom space,sequence tint)
+global function ImageTextEx(sequence font,sequence text,atom fontSize,atom space,sequence tint)
         return c_func(xImageTextEx,{font,text,fontSize,space,tint})
 end function
 
-public procedure ImageFormat(atom image,atom newFormat)
-        c_proc(xImageFormat,{image,newFormat})
-end procedure
+global function ImageFormat(sequence image,atom newFormat)
+atom mem=allocate(size_image)
+        c_proc(xImageFormat,{poke_image(mem,image),newFormat})
+sequence result=peek_image(mem)
+free(mem)
+return result
+end function
 
-public procedure ImageToPOT(atom image,sequence fill)
+global procedure ImageToPOT(atom image,sequence fill)
         c_proc(xImageToPOT,{image,fill})
 end procedure
 
-public procedure ImageCrop(atom image,sequence crop)
+global procedure ImageCrop(atom image,sequence crop)
         c_proc(xImageCrop,{image,crop})
 end procedure
 
-public procedure ImageAlphaCrop(atom image,atom threshold)
+global procedure ImageAlphaCrop(atom image,atom threshold)
         c_proc(xImageAlphaCrop,{image,threshold})
 end procedure
 
-public procedure ImageAlphaClear(atom image,sequence color,atom threshold)
+global procedure ImageAlphaClear(atom image,sequence color,atom threshold)
         c_proc(xImageAlphaClear,{image,color,threshold})
 end procedure
 
-public procedure ImageAlphaMask(atom image,sequence mask)
+global procedure ImageAlphaMask(atom image,sequence mask)
         c_proc(xImageAlphaMask,{image,mask})
 end procedure
 
-public procedure ImageAlphaPremultiply(atom image)
+global procedure ImageAlphaPremultiply(atom image)
         c_proc(xImageAlphaPremultiply,{image})
 end procedure
 
-public procedure ImageBlurGaussian(atom image,atom blurSize)
+global procedure ImageBlurGaussian(atom image,atom blurSize)
         c_proc(xImageBlurGaussian,{image,blurSize})
 end procedure
 
-public procedure ImageKernelConvolution(atom image,atom kernel,atom size)
+global procedure ImageKernelConvolution(atom image,atom kernel,atom size)
         c_proc(xImageKernelConvolution,{image,kernel,size})
 end procedure
 
-public procedure ImageResize(atom image,atom width,atom height)
+global procedure ImageResize(atom image,atom width,atom height)
         c_proc(xImageResize,{image,width,height})
 end procedure
 
-public procedure ImageResizeNN(atom image,atom width,atom height)
+global procedure ImageResizeNN(atom image,atom width,atom height)
         c_proc(xImageResizeNN,{image,width,height})
 end procedure
 
-public procedure ImageResizeCanvas(atom image,atom width,atom height,atom x,atom y,sequence fill)
+global procedure ImageResizeCanvas(atom image,atom width,atom height,atom x,atom y,sequence fill)
         c_proc(xImageResizeCanvas,{image,width,height,x,y,fill})
 end procedure
 
-public procedure ImageMipmaps(atom image)
+global procedure ImageMipmaps(atom image)
         c_proc(xImageMipmaps,{image})
 end procedure
 
-public procedure ImageDither(atom image,atom r,atom g,atom b,atom a)
+global procedure ImageDither(atom image,atom r,atom g,atom b,atom a)
         c_proc(xImageDither,{image,r,g,b,a})
 end procedure
 
-public procedure ImageFlipVertical(atom image)
+global procedure ImageFlipVertical(atom image)
         c_proc(xImageFlipVertical,{image})
 end procedure
 
-public procedure ImageFlipHorizontal(atom image)
+global procedure ImageFlipHorizontal(atom image)
         c_proc(xImageFlipHorizontal,{image})
 end procedure
 
-public procedure ImageRotate(atom image,atom degrees)
+global procedure ImageRotate(atom image,atom degrees)
         c_proc(xImageRotate,{image,degrees})
 end procedure
 
-public procedure ImageRotateCW(atom image)
+global procedure ImageRotateCW(atom image)
         c_proc(xImageRotateCW,{image})
 end procedure
 
-public procedure ImageRotateCCW(atom image)
+global procedure ImageRotateCCW(atom image)
         c_proc(xImageRotateCCW,{image})
 end procedure
 
-public procedure ImageColorTint(atom image,sequence color)
+global procedure ImageColorTint(atom image,sequence color)
         c_proc(xImageColorTint,{image,color})
 end procedure
 
-public procedure ImageColorInvert(atom image)
+global procedure ImageColorInvert(atom image)
         c_proc(xImageColorInvert,{image})
 end procedure
 
-public procedure ImageColorGrayscale(atom image)
+global procedure ImageColorGrayscale(atom image)
         c_proc(xImageColorGrayscale,{image})
 end procedure
 
-public procedure ImageColorContrast(atom image,atom contrast)
+global procedure ImageColorContrast(atom image,atom contrast)
         c_proc(xImageColorContrast,{image,contrast})
 end procedure
 
-public procedure ImageColorBrightness(atom image,atom bright)
+global procedure ImageColorBrightness(atom image,atom bright)
         c_proc(xImageColorBrightness,{image,bright})
 end procedure
 
-public procedure ImageColorReplace(atom image,sequence color,sequence replace)
+global procedure ImageColorReplace(atom image,sequence color,sequence replace)
         c_proc(xImageColorReplace,{image,color,replace})
 end procedure
 
-public function LoadImageColors(sequence image)
-        return c_func(xLoadImageColors,{image})
+global function LoadImageColors(sequence image,integer raw=0)
+atom mem=allocate(size_image)
+integer width=2,height=3
+integer numPixels = image[width] * image[height]
+atom pPixels=c_func(xLoadImageColors,{poke_image(mem,image)})
+free(mem)
+if raw then
+        return pPixels
+else
+        ---- Lies alle Bytes auf einmal 
+        sequence rawBytes = peek({pPixels, numPixels * 4})
+        --  Die Farben als {R,G,B,A} Gruppen:
+        sequence colors = {}
+        for i=1 to length(rawBytes) by 4 do
+            colors = append(colors, {rawBytes[i], rawBytes[i+1], rawBytes[i+2], rawBytes[i+3]})
+        end for
+        colors=append(colors,pPixels) -- pointer noch anhaengen zum wieder freigeben
+        return colors
+end if
+
 end function
 
-public function LoadImagePalette(sequence image,atom size,atom count)
+global function LoadImagePalette(sequence image,atom size,atom count)
         return c_func(xLoadImagePalette,{image,size,count})
 end function
 
-public procedure UnloadImageColors(atom colors)
-        c_proc(xUnloadImageColors,{colors})
+global procedure UnloadImageColors(object  colors)
+atom ptrforfree
+if sequence(colors) then
+    ptrforfree=colors[$]
+else
+    ptrforfree=colors
+end if
+        c_proc(xUnloadImageColors,{ptrforfree})
 end procedure
 
-public procedure UnloadImagePalette(atom colors)
+global procedure UnloadImagePalette(atom colors)
         c_proc(xUnloadImagePalette,{colors})
 end procedure
 
-public function GetImageAlphaBorder(sequence image,atom threshold)
+global function GetImageAlphaBorder(sequence image,atom threshold)
         return c_func(xGetImageAlphaBorder,{image,threshold})
 end function
 
-public function GetImageColor(sequence image,atom x,atom y)
+global function GetImageColor(sequence image,atom x,atom y)
         return c_func(xGetImageColor,{image,x,y})
 end function
 
 --Image drawing functions
-public constant xImageClearBackground = define_c_proc(ray,"+ImageClearBackground",{C_POINTER,C_Color}),
+constant xImageClearBackground = define_c_proc(ray,"+ImageClearBackground",{C_POINTER,C_Color}),
                                 xImageDrawPixel = define_c_proc(ray,"+ImageDrawPixel",{C_POINTER,C_INT,C_INT,C_Color}),
                                 xImageDrawPixelV = define_c_proc(ray,"+ImageDrawPixelV",{C_POINTER,Vector2,C_Color}),
                                 xImageDrawLine = define_c_proc(ray,"+ImageDrawLine",{C_POINTER,C_INT,C_INT,C_INT,C_INT,C_Color}),
@@ -3308,96 +3471,99 @@ public constant xImageClearBackground = define_c_proc(ray,"+ImageClearBackground
                                 xImageDrawText = define_c_proc(ray,"+ImageDrawText",{C_POINTER,C_STRING,C_INT,C_INT,C_INT,C_Color}),
                                 xImageDrawTextEx = define_c_proc(ray,"+ImageDrawTextEx",{C_POINTER,Font,C_STRING,Vector2,C_FLOAT,C_FLOAT,C_Color})
                                 
-public procedure ImageClearBackground(atom dst,sequence color)
-        c_proc(xImageClearBackground,{dst,color})
-end procedure
+global function ImageClearBackground(sequence dst,sequence color)
+atom mem=allocate(size_image)
+        c_proc(xImageClearBackground,{poke_image(mem,dst),bytes_to_int(color)})
+sequence result=peek_image(mem)
+return result
+end function
 
-public procedure ImageDrawPixel(atom dst,atom x,atom y,sequence color)
+global procedure ImageDrawPixel(atom dst,atom x,atom y,sequence color)
         c_proc(xImageDrawPixel,{dst,x,y,color})
 end procedure
 
-public procedure ImageDrawPixelV(atom dst,sequence pos,sequence color)
+global procedure ImageDrawPixelV(atom dst,sequence pos,sequence color)
         c_proc(xImageDrawPixelV,{dst,pos,color})
 end procedure
 
-public procedure ImageDrawLine(atom dst,atom x,atom y,atom endx,atom endy,sequence color)
+global procedure ImageDrawLine(atom dst,atom x,atom y,atom endx,atom endy,sequence color)
         c_proc(xImageDrawLine,{dst,x,y,endx,endy,color})
 end procedure
 
-public procedure ImageDrawLineV(atom dst,sequence start,sequence e,sequence color)
+global procedure ImageDrawLineV(atom dst,sequence start,sequence e,sequence color)
         c_proc(xImageDrawLine,{dst,start,e,color})
 end procedure
 
-public procedure ImageDrawLineEx(atom dst,sequence start,sequence e,atom thick,sequence color)
+global procedure ImageDrawLineEx(atom dst,sequence start,sequence e,atom thick,sequence color)
         c_proc(xImageDrawLineEx,{dst,start,e,thick,color})
 end procedure
 
-public procedure ImageDrawCircle(atom dst,atom x,atom y,atom rad,sequence color)
+global procedure ImageDrawCircle(atom dst,atom x,atom y,atom rad,sequence color)
         c_proc(xImageDrawCircle,{dst,x,y,rad,color})
 end procedure
 
-public procedure ImageDrawCircleV(atom dst,sequence center,atom rad,sequence color)
+global procedure ImageDrawCircleV(atom dst,sequence center,atom rad,sequence color)
         c_proc(xImageDrawCircleV,{dst,center,rad,color})
 end procedure
 
-public procedure ImageDrawCircleLines(atom dst,atom x,atom y,atom rad,sequence color)
+global procedure ImageDrawCircleLines(atom dst,atom x,atom y,atom rad,sequence color)
         c_proc(xImageDrawCircleLines,{dst,x,y,rad,color})
 end procedure
 
-public procedure ImageDrawCircleLinesV(atom dst,sequence center,atom rad,sequence color)
+global procedure ImageDrawCircleLinesV(atom dst,sequence center,atom rad,sequence color)
         c_proc(xImageDrawCircleLinesV,{dst,center,rad,color})
 end procedure
 
-public procedure ImageDrawRectangle(atom dst,atom x,atom y,atom width,atom height,sequence color)
+global procedure ImageDrawRectangle(atom dst,atom x,atom y,atom width,atom height,sequence color)
         c_proc(xImageDrawRectangle,{dst,x,y,width,height,color})
 end procedure
 
-public procedure ImageDrawRectangleV(atom dst,sequence pos,sequence size,sequence color)
+global procedure ImageDrawRectangleV(atom dst,sequence pos,sequence size,sequence color)
         c_proc(xImageDrawRectangleV,{dst,pos,size,color})
 end procedure
 
-public procedure ImageDrawRectangleRec(atom dst,sequence rec,sequence color)
+global procedure ImageDrawRectangleRec(atom dst,sequence rec,sequence color)
         c_proc(xImageDrawRectangleRec,{dst,rec,color})
 end procedure
 
-public procedure ImageDrawRectangleLines(atom dst,sequence rec,atom thick,sequence color)
+global procedure ImageDrawRectangleLines(atom dst,sequence rec,atom thick,sequence color)
         c_proc(xImageDrawRectangleLines,{dst,rec,thick,color})
 end procedure
 
-public procedure ImageDrawTriangle(atom dst,sequence v,sequence v2,sequence v3,sequence color)
+global procedure ImageDrawTriangle(atom dst,sequence v,sequence v2,sequence v3,sequence color)
         c_proc(xImageDrawTriangle,{dst,v,v2,v3,color})
 end procedure
 
-public procedure ImageDrawTriangleEx(atom dst,sequence v,sequence v2,sequence v3,sequence c,sequence c2,sequence c3)
+global procedure ImageDrawTriangleEx(atom dst,sequence v,sequence v2,sequence v3,sequence c,sequence c2,sequence c3)
         c_proc(xImageDrawTriangleEx,{dst,v,v2,v3,c,c2,c3})
 end procedure
 
-public procedure ImageDrawTriangleLines(atom dst,sequence v,sequence v2,sequence v3,sequence color)
+global procedure ImageDrawTriangleLines(atom dst,sequence v,sequence v2,sequence v3,sequence color)
         c_proc(xImageDrawTriangleLines,{dst,v,v2,v3,color})
 end procedure
 
-public procedure ImageDrawTriangleFan(atom dst,atom points,atom count,sequence color)
+global procedure ImageDrawTriangleFan(atom dst,atom points,atom count,sequence color)
         c_proc(xImageDrawTriangleFan,{dst,points,count,color})
 end procedure
 
-public procedure ImageDrawTriangleStrip(atom dst,atom points,atom count,sequence color)
+global procedure ImageDrawTriangleStrip(atom dst,atom points,atom count,sequence color)
         c_proc(xImageDrawTriangleStrip,{dst,points,count,color})
 end procedure
 
-public procedure ImageDraw(atom dst,sequence src,sequence srcRec,sequence dstRec,sequence tint)
+global procedure ImageDraw(atom dst,sequence src,sequence srcRec,sequence dstRec,sequence tint)
         c_proc(xImageDraw,{dst,src,srcRec,dstRec,tint})
 end procedure
 
-public procedure ImageDrawText(atom dst,sequence text,atom x,atom y,atom size,sequence color)
+global procedure ImageDrawText(atom dst,sequence text,atom x,atom y,atom size,sequence color)
         c_proc(xImageDrawText,{dst,text,x,y,size,color})
 end procedure
 
-public procedure ImageDrawTextEx(atom dst,sequence font,sequence text,sequence pos,atom size,atom space,sequence tint)
+global procedure ImageDrawTextEx(atom dst,sequence font,sequence text,sequence pos,atom size,atom space,sequence tint)
         c_proc(xImageDrawTextEx,{dst,font,text,pos,size,space,tint})
 end procedure
 
 --Texture loading functions
-public constant xLoadTexture = define_c_func(ray,"+LoadTexture",{C_HPTR,C_STRING},Texture2D),
+global constant xLoadTexture = define_c_func(ray,"+LoadTexture",{C_HPTR,C_STRING},Texture2D),
                                 xLoadTextureFromImage = define_c_func(ray,"+LoadTextureFromImage",{C_HPTR,Image},Texture2D),
                                 xLoadTextureCubemap = define_c_func(ray,"+LoadTextureCubemap",{Image,C_INT},TextureCubemap),
                                 xLoadRenderTexture = define_c_func(ray,"+LoadRenderTexture",{C_HPTR,C_INT,C_INT},RenderTexture2D),
@@ -3427,7 +3593,7 @@ free (mem)
 return tex
 end function
 
-public function LoadTextureFromImage(sequence image)
+global function LoadTextureFromImage(sequence image)
 atom memimg=allocate(24)
 atom memtex=allocate(size_texture)
 atom ptr
@@ -3451,11 +3617,11 @@ free (memtex)
 return tex
 end function
 
-public function LoadTextureCubemap(sequence image,atom layout)
+global function LoadTextureCubemap(sequence image,atom layout)
         return c_func(xLoadTextureCubemap,{image,layout})
 end function
 
-public function LoadRenderTexture(atom width,atom height)
+global function LoadRenderTexture(atom width,atom height)
 atom addr=allocate(size_rendertexture)
 sequence result
 atom ptr=0
@@ -3465,7 +3631,7 @@ free(addr)
 return result
 end function
 
-public function IsTextureValid(sequence tex)
+global function IsTextureValid(sequence tex)
         return c_func(xIsTextureValid,{tex})
 end function
 
@@ -3480,17 +3646,17 @@ poke4(mem+16,tex[5])
 free(mem)
 end procedure
 
-public function IsRenderTextureValid(sequence target)
+global function IsRenderTextureValid(sequence target)
         return c_func(xIsRenderTextureValid,{target})
 end function
 
-public procedure UnloadRenderTexture(sequence target)
+global procedure UnloadRenderTexture(sequence target)
 atom addr =allocate(size_rendertexture)
         c_proc(xUnloadRenderTexture,{poke_rendertexture(addr,target)})
 free(addr)
 end procedure
 
-public procedure UpdateTexture(sequence tex,atom pixels)
+global procedure UpdateTexture(sequence tex,atom pixels)
 atom mem=allocate(size_texture)
 poke4(mem,tex[1])
 poke4(mem+4,tex[2])
@@ -3501,20 +3667,20 @@ poke4(mem+16,tex[5])
 free(mem)
 end procedure
 
-public procedure UpdateTextureRec(sequence tex,sequence rec,atom pixels)
+global procedure UpdateTextureRec(sequence tex,sequence rec,atom pixels)
         c_proc(xUpdateTextureRec,{tex,rec,pixels})
 end procedure
 
 --Texture config functions
-public constant xGenTextureMipmaps = define_c_proc(ray,"+GenTextureMipmaps",{C_POINTER}),
+global constant xGenTextureMipmaps = define_c_proc(ray,"+GenTextureMipmaps",{C_POINTER}),
                                 xSetTextureFilter = define_c_proc(ray,"+SetTextureFilter",{Texture2D,C_INT}),
                                 xSetTextureWrap = define_c_proc(ray,"+SetTextureWrap",{Texture2D,C_INT})
                                 
-public procedure GenTextureMipmaps(atom tex)
+global procedure GenTextureMipmaps(atom tex)
         c_proc(xGenTextureMipmaps,{tex})
 end procedure
 
-public function SetTextureFilter(sequence tex,atom filter)
+global function SetTextureFilter(sequence tex,atom filter)
 atom addr=allocate(size_texture)
         c_proc(xSetTextureFilter,{poke_texture(addr,tex),filter})
 sequence result=peek_texture(addr)
@@ -3522,19 +3688,19 @@ free(addr)
 return result
 end function
 
-public procedure SetTextureWrap(sequence tex,atom _wrap)
+global procedure SetTextureWrap(sequence tex,atom _wrap)
         c_proc(xSetTextureWrap,{tex,_wrap})
 end procedure
 
 --Texture drawing functions
-public constant xDrawTexture = define_c_proc(ray,"+DrawTexture",{Texture2D,C_INT,C_INT,C_Color}),
+constant xDrawTexture = define_c_proc(ray,"+DrawTexture",{Texture2D,C_INT,C_INT,C_Color}),
                                 xDrawTextureV = define_c_proc(ray,"+DrawTextureV",{Texture2D,Vector2,C_Color}),
                                 xDrawTextureEx = define_c_proc(ray,"+DrawTextureEx",{Texture2D,Vector2,C_FLOAT,C_FLOAT,C_Color}),
                                 xDrawTextureRec = define_c_proc(ray,"+DrawTextureRec",{Texture2D,Rectangle,Vector2,C_Color}),
                                 xDrawTexturePro = define_c_proc(ray,"+DrawTexturePro",{Texture2D,Rectangle,Rectangle,Vector2,C_FLOAT,C_Color}),
                                 xDrawTextureNPatch = define_c_proc(ray,"+DrawTextureNPatch",{Texture2D,NPatchInfo,Rectangle,Vector2,C_FLOAT,C_Color})
                                 
-public procedure DrawTexture(sequence tex,atom x,atom y,sequence color)
+global procedure DrawTexture(sequence tex,atom x,atom y,sequence color)
 atom mem=allocate(20)
 poke4(mem,tex[1])
 poke4(mem+4,tex[2])
@@ -3545,7 +3711,7 @@ poke4(mem+16,tex[5])
 free(mem)
 end procedure
 
-public procedure DrawTextureV(sequence tex,sequence pos,sequence color)
+global procedure DrawTextureV(sequence tex,sequence pos,sequence color)
 atom mem=allocate(20)
 poke4(mem,tex[1])
 poke4(mem+4,tex[2])
@@ -3556,7 +3722,7 @@ poke4(mem+16,tex[5])
 free(mem)
 end procedure
 
-public procedure DrawTextureEx(sequence tex,sequence pos,atom rotation,atom scale,sequence tint)
+global procedure DrawTextureEx(sequence tex,sequence pos,atom rotation,atom scale,sequence tint)
 atom mem=allocate(20)
 poke4(mem,tex[1])
 poke4(mem+4,tex[2])
@@ -3567,7 +3733,7 @@ poke4(mem+16,tex[5])
 free(mem)
 end procedure
 
-public procedure DrawTextureRec(sequence tex,sequence source,sequence pos,sequence tint)
+global procedure DrawTextureRec(sequence tex,sequence source,sequence pos,sequence tint)
 atom mem=allocate(20)
 poke4(mem,tex[1])
 poke4(mem+4,tex[2])
@@ -3584,7 +3750,7 @@ free(mem)
 free(memrect)
 end procedure
 
-public procedure DrawTexturePro(sequence tex,sequence source,sequence dst,sequence origin,atom rotation,sequence tint)
+global procedure DrawTexturePro(sequence tex,sequence source,sequence dst,sequence origin,atom rotation,sequence tint)
 atom mem=allocate(20)
 poke4(mem,tex[1])
 poke4(mem+4,tex[2])
@@ -3607,12 +3773,12 @@ free(memrect1)
 free(memrect2)
 end procedure
 
-public procedure DrawTextureNPatch(sequence tex,sequence patch,sequence dst,sequence origin,atom rotation,sequence tint)
+global procedure DrawTextureNPatch(sequence tex,sequence patch,sequence dst,sequence origin,atom rotation,sequence tint)
         c_proc(xDrawTextureNPatch,{tex,patch,dst,origin,rotation,tint})
 end procedure
 
 --Color/pixel functions
-public constant xColorIsEqual = define_c_func(ray,"+ColorIsEqual",{C_Color,C_Color},C_BOOL),
+constant xColorIsEqual = define_c_func(ray,"+ColorIsEqual",{C_Color,C_Color},C_BOOL),
                                 xFade = define_c_func(ray,"+Fade",{C_Color,C_FLOAT},C_Color),
                                 xColorToInt = define_c_func(ray,"+ColorToInt",{C_Color},C_INT),
                                 xColorNormalize = define_c_func(ray,"+ColorNormalize",{C_Color},Vector4),
@@ -3741,7 +3907,7 @@ public function GetPixelDataSize(atom width,atom height,atom _format)
 end function
 
 --Font loading functions
-public constant xGetFontDefault = define_c_func(ray,"+GetFontDefault",{C_HPTR},Font),
+constant xGetFontDefault = define_c_func(ray,"+GetFontDefault",{C_HPTR},Font),
                                 xLoadFont = define_c_func(ray,"+LoadFont",{C_HPTR,C_STRING},Font),
                                 xLoadFontEx = define_c_func(ray,"+LoadFontEx",{C_HPTR,C_STRING,C_INT,C_POINTER,C_INT},Font),
                                 xLoadFontFromImage = define_c_func(ray,"+LoadFontFromImage",{Image,C_Color,C_INT},Font),
@@ -3822,7 +3988,7 @@ public function ExportFontAsCode(sequence font,sequence fName)
 end function
 
 --Text drawing functions
-public constant xDrawFPS = define_c_proc(ray,"+DrawFPS",{C_INT,C_INT}),
+constant xDrawFPS = define_c_proc(ray,"+DrawFPS",{C_INT,C_INT}),
                                 xDrawText = define_c_proc(ray,"+DrawText",{C_STRING,C_INT,C_INT,C_INT,C_Color}),
                                 xDrawTextEx = define_c_proc(ray,"+DrawTextEx",{Font,C_STRING,Vector2,C_FLOAT,C_FLOAT,C_Color}),
                                 xDrawTextPro = define_c_proc(ray,"+DrawTextPro",{Font,C_STRING,Vector2,Vector2,C_FLOAT,C_FLOAT,C_FLOAT,C_Color}),
@@ -3864,7 +4030,7 @@ public procedure DrawTextCodepoints(atom font,atom codepoints,atom count,sequenc
 end procedure
 
 --Text font info functions
-public constant xSetTextLineSpacing = define_c_proc(ray,"+SetTextLineSpacing",{C_INT}),
+constant xSetTextLineSpacing = define_c_proc(ray,"+SetTextLineSpacing",{C_INT}),
                                 xMeasureText = define_c_func(ray,"+MeasureText",{C_STRING,C_INT},C_INT),
                                 xMeasureTextEx = define_c_func(ray,"+MeasureTextEx",{Font,C_STRING,C_FLOAT,C_FLOAT},Vector2),
                                 xGetGlyphIndex = define_c_func(ray,"+GetGlyphIndex",{Font,C_INT},C_INT),
@@ -3904,7 +4070,7 @@ public function GetGlyphAtlasRec(sequence font,atom cpoint)
 end function
 
 --Text codepoint functions
-public constant xLoadUTF8 = define_c_func(ray,"+LoadUTF8",{C_POINTER,C_INT},C_STRING),
+constant xLoadUTF8 = define_c_func(ray,"+LoadUTF8",{C_POINTER,C_INT},C_STRING),
                                 xUnloadUTF8 = define_c_proc(ray,"+UnloadUTF8",{C_STRING}),
                                 xLoadCodepoints = define_c_func(ray,"+LoadCodepoints",{C_STRING,C_POINTER},C_POINTER),
                                 xUnloadCodepoints = define_c_proc(ray,"+UnloadCodepoints",{C_POINTER}),
@@ -3951,7 +4117,7 @@ public function CodepointToUTF8(atom point,atom size)
 end function
 
 --Text string management functions
-public constant xTextCopy = define_c_func(ray,"+TextCopy",{C_POINTER,C_STRING},C_INT),
+constant xTextCopy = define_c_func(ray,"+TextCopy",{C_POINTER,C_STRING},C_INT),
                                 xTextIsEqual = define_c_func(ray,"+TextIsEqual",{C_STRING,C_STRING},C_BOOL),
                                 xTextLength = define_c_func(ray,"+TextLength",{C_STRING},C_UINT),
                                 xTextFormat = define_c_func(ray,"+TextFormat",{C_STRING,C_POINTER},C_STRING),
@@ -4026,7 +4192,15 @@ public procedure TextAppend(sequence text,sequence app,atom pos)
 end procedure
 
 public function TextFindIndex(sequence text,sequence _find)
-        return c_func(xTextFindIndex,{text,_find})
+atom result=-1 
+        result = match(text,_find) 
+        if result=0 then  --emulate C - function
+            return -1
+        else  
+            return result
+        end if
+        return result
+        --return c_func(xTextFindIndex,{text,_find})
 end function
 
 public function TextToUpper(sequence text)
@@ -4063,7 +4237,7 @@ public function TextToFloat(sequence text)
 end function
 
 --3D shape drawing functions
-public constant xDrawLine3D = define_c_proc(ray,"+DrawLine3D",{Vector3,Vector3,C_Color}),
+constant xDrawLine3D = define_c_proc(ray,"+DrawLine3D",{Vector3,Vector3,C_Color}),
                                 xDrawPoint3D = define_c_proc(ray,"+DrawPoint3D",{Vector3,C_Color}),
                                 xDrawCircle3D = define_c_proc(ray,"+DrawCircle3D",{Vector3,C_FLOAT,Vector3,C_FLOAT,C_Color}),
                                 xDrawTriangle3D = define_c_proc(ray,"+DrawTriangle3D",{Vector3,Vector3,Vector3,C_Color}),
@@ -4189,7 +4363,7 @@ end procedure
 
 public procedure DrawCylinderWires(sequence pos,atom radtop,atom radbot,atom height,atom slices,sequence col)
 atom v1=allocate(size_vector3)
-        c_proc(xDrawCylinderWires,{poke_vector3(v1,pos),radtop,radbot,height,slices,col})
+        c_proc(xDrawCylinderWires,{poke_vector3(v1,pos),radtop,radbot,height,slices,bytes_to_int(col)})
 free(v1)
 end procedure
 
@@ -4201,6 +4375,7 @@ free(v1)
 free(v2)
 end procedure
 
+--CHECK for 6.1+
 public procedure DrawCapsule(sequence startpos,sequence ep,atom rad,atom slices,atom rings,sequence col)
 atom v1=allocate(size_vector3)
 atom v2=allocate(size_vector3)
@@ -4208,7 +4383,7 @@ atom v2=allocate(size_vector3)
 free(v1)
 free(v2)
 end procedure
-
+--CHECK for 6.1+
 public procedure DrawCapsuleWires(sequence start,sequence ep,atom rad,atom slices,atom rings,sequence col)
 atom v1=allocate(size_vector3)
 atom v2=allocate(size_vector3)
@@ -4232,8 +4407,8 @@ public procedure DrawGrid(atom slices,atom space)
 end procedure
 
 --Model 3D Loading functions
-public constant xLoadModel = define_c_func(ray,"+LoadModel",{C_HPTR,C_STRING},Model),
-                                xLoadModelFromMesh = define_c_func(ray,"+LoadModelFromMesh",{Mesh},Model),
+constant xLoadModel = define_c_func(ray,"+LoadModel",{C_HPTR,C_STRING},Model),
+                                xLoadModelFromMesh = define_c_func(ray,"+LoadModelFromMesh",{C_HPTR,Mesh},Model),
                                 xIsModelValid = define_c_func(ray,"+IsModelValid",{Model},C_BOOL),
                                 xUnloadModel = define_c_proc(ray,"+UnloadModel",{Model}),
                                 xGetModelBoundingBox = define_c_func(ray,"+GetModelBoundingBox",{C_HPTR,Model},BoundingBox)
@@ -4251,7 +4426,15 @@ return result
 end function
 
 public function LoadModelFromMesh(sequence mesh)
-        return c_func(xLoadModelFromMesh,{mesh})
+atom pmesh=allocate(size_mesh)
+atom mem=allocate(size_model)
+atom ptr
+sequence result=Tmodel
+        ptr = c_func(xLoadModelFromMesh,{mem,poke_mesh(pmesh,mesh)})
+result=peek_model(ptr)
+free(pmesh)
+free(mem)
+return result
 end function
 
 public function IsModelValid(sequence model)
@@ -4277,12 +4460,12 @@ return result
 end function
 
 --Model drawing functions
-public constant xDrawModel = define_c_proc(ray,"+DrawModel",{Model,Vector3,C_FLOAT,C_Color}),
+constant xDrawModel = define_c_proc(ray,"+DrawModel",{Model,Vector3,C_FLOAT,C_Color}),
                                 xDrawModelEx = define_c_proc(ray,"+DrawModelEx",{Model,Vector3,Vector3,C_FLOAT,Vector3,C_Color}),
                                 xDrawModelWires = define_c_proc(ray,"+DrawModelWires",{Model,Vector3,C_FLOAT,C_Color}),
                                 xDrawModelWiresEx = define_c_proc(ray,"+DrawModelWiresEx",{Model,Vector3,Vector3,C_FLOAT,Vector3,C_Color}),
-                                xDrawModelPoints = define_c_proc(ray,"+DrawModelPoints",{Model,Vector3,C_FLOAT,C_Color}),
-                                xDrawModelPointsEx = define_c_proc(ray,"+DrawModelPointsEx",{Model,Vector3,Vector3,C_FLOAT,Vector3,C_Color}),
+                            --  xDrawModelPoints = define_c_proc(ray,"+DrawModelPoints",{Model,Vector3,C_FLOAT,C_Color}),
+                            --  xDrawModelPointsEx = define_c_proc(ray,"+DrawModelPointsEx",{Model,Vector3,Vector3,C_FLOAT,Vector3,C_Color}),
                                 xDrawBoundingBox = define_c_proc(ray,"+DrawBoundingBox",{BoundingBox,C_Color}),
                                 xDrawBillboard = define_c_proc(ray,"+DrawBillboard",{Camera,Texture2D,Vector3,C_FLOAT,C_Color}),
                                 xDrawBillboardRec = define_c_proc(ray,"+DrawBillboardRec",{Camera,Texture2D,Rectangle,Vector3,Vector2,C_Color}),
@@ -4297,7 +4480,15 @@ free(vec1)
 end procedure
 
 public procedure DrawModelEx(sequence model,sequence pos,sequence rotAxis,atom rotAng,sequence scale,sequence tint)
-        c_proc(xDrawModelEx,{model,pos,rotAxis,rotAng,scale,tint})
+atom modl=allocate(size_model)
+atom pos1=allocate(size_vector3)
+atom rot=allocate(size_vector3)
+atom sca=allocate(size_vector3)
+        c_proc(xDrawModelEx,{poke_model(modl,model),poke_vector3(pos1,pos),poke_vector3(rot,rotAxis),rotAng,poke_vector3(sca,scale),bytes_to_int(tint)})
+free(modl)
+free(pos1)
+free(rot)
+free(sca)
 end procedure
 
 public procedure DrawModelWires(sequence model,sequence pos,atom scale,sequence tint)
@@ -4308,13 +4499,14 @@ public procedure DrawModelWiresEx(sequence model,sequence pos,sequence rotAxis,a
         c_proc(xDrawModelWiresEx,{model,pos,rotAxis,rotAng,scale,tint})
 end procedure
 
-public procedure DrawModelPoints(sequence model,sequence pos,atom scale,sequence tint)
-        c_proc(xDrawModelPoints,{model,pos,scale,tint})
-end procedure
+--CHECK removed 6.0
+--public procedure DrawModelPoints(sequence model,sequence pos,atom scale,sequence tint)
+--      c_proc(xDrawModelPoints,{model,pos,scale,tint})
+--end procedure
 
-public procedure DrawModelPointsEx(sequence model,sequence pos,sequence rotAxis,atom rotAng,sequence scale,sequence tint)
-        c_proc(xDrawModelPointsEx,{model,pos,rotAxis,rotAng,scale,tint})
-end procedure
+--public procedure DrawModelPointsEx(sequence model,sequence pos,sequence rotAxis,atom rotAng,sequence scale,sequence tint)
+--      c_proc(xDrawModelPointsEx,{model,pos,rotAxis,rotAng,scale,tint})
+--end procedure
 
 public procedure DrawBoundingBox(sequence box,sequence col)
 atom box1=allocate(size_boundingbox)
@@ -4352,7 +4544,7 @@ free(camera)
 end procedure
 
 --Mesh management functions
-public constant xUploadMesh = define_c_proc(ray,"+UploadMesh",{C_POINTER,C_BOOL}),
+constant xUploadMesh = define_c_proc(ray,"+UploadMesh",{C_POINTER,C_BOOL}),
                                 xUpdateMeshBuffer = define_c_proc(ray,"+UpdateMeshBuffer",{Mesh,C_INT,C_POINTER,C_INT,C_INT}),
                                 xUnloadMesh = define_c_proc(ray,"+UnloadMesh",{Mesh}),
                                 xDrawMesh = define_c_proc(ray,"+DrawMesh",{Mesh,Material,Matrix}),
@@ -4399,64 +4591,118 @@ public function ExportMeshAsCode(sequence mesh,sequence fName)
 end function
 
 --Mesh generation functions
-public constant xGenMeshPoly = define_c_func(ray,"+GenMeshPoly",{C_INT,C_FLOAT},Mesh),
-                                xGenMeshPlane = define_c_func(ray,"+GenMeshPlane",{C_FLOAT,C_FLOAT,C_INT,C_INT},Mesh),
-                                xGenMeshCube = define_c_func(ray,"+GenMeshCube",{C_FLOAT,C_FLOAT,C_FLOAT},Mesh),
-                                xGenMeshSphere = define_c_func(ray,"+GenMeshSphere",{C_FLOAT,C_INT,C_INT},Mesh),
-                                xGenMeshHemiSphere = define_c_func(ray,"+GenMeshHemiSphere",{C_FLOAT,C_INT,C_INT},Mesh),
-                                xGenMeshCylinder = define_c_func(ray,"+GenMeshCylinder",{C_FLOAT,C_FLOAT,C_INT},Mesh),
-                                xGenMeshCone = define_c_func(ray,"+GenMeshCone",{C_FLOAT,C_FLOAT,C_INT},Mesh),
-                                xGenMeshTorus = define_c_func(ray,"+GenMeshTorus",{C_FLOAT,C_FLOAT,C_INT,C_INT},Mesh),
-                                xGenMeshKnot = define_c_func(ray,"+GenMeshKnot",{C_FLOAT,C_FLOAT,C_INT,C_INT},Mesh),
-                                xGenMeshHeightmap = define_c_func(ray,"+GenMeshHeightmap",{Image,Vector3},Mesh),
-                                xGenMeshCubicmap = define_c_func(ray,"+GenMeshCubicmap",{Image,Vector3},Mesh)
+constant xGenMeshPoly = define_c_func(ray,"+GenMeshPoly",{C_HPTR,C_INT,C_FLOAT},Mesh),
+                                xGenMeshPlane = define_c_func(ray,"+GenMeshPlane",{C_HPTR,C_FLOAT,C_FLOAT,C_INT,C_INT},Mesh),
+                                xGenMeshCube = define_c_func(ray,"+GenMeshCube",{C_HPTR,C_FLOAT,C_FLOAT,C_FLOAT},Mesh),
+                                xGenMeshSphere = define_c_func(ray,"+GenMeshSphere",{C_HPTR,C_FLOAT,C_INT,C_INT},Mesh),
+                                xGenMeshHemiSphere = define_c_func(ray,"+GenMeshHemiSphere",{C_HPTR,C_FLOAT,C_INT,C_INT},Mesh),
+                                xGenMeshCylinder = define_c_func(ray,"+GenMeshCylinder",{C_HPTR,C_FLOAT,C_FLOAT,C_INT},Mesh),
+                                xGenMeshCone = define_c_func(ray,"+GenMeshCone",{C_HPTR,C_FLOAT,C_FLOAT,C_INT},Mesh),
+                                xGenMeshTorus = define_c_func(ray,"+GenMeshTorus",{C_HPTR,C_FLOAT,C_FLOAT,C_INT,C_INT},Mesh),
+                                xGenMeshKnot = define_c_func(ray,"+GenMeshKnot",{C_HPTR,C_FLOAT,C_FLOAT,C_INT,C_INT},Mesh),
+                                xGenMeshHeightmap = define_c_func(ray,"+GenMeshHeightmap",{C_HPTR,Image,Vector3},Mesh),
+                                xGenMeshCubicmap = define_c_func(ray,"+GenMeshCubicmap",{C_HPTR,Image,Vector3},Mesh)
                                 
 public function GenMeshPoly(atom sides,atom rad)
-        return c_func(xGenMeshPoly,{sides,rad})
+atom mem=allocate(size_mesh)
+atom ptr=c_func(xGenMeshPoly,{mem,sides,rad})
+sequence mesh=peek_mesh(ptr)
+free(mem)
+return mesh
 end function
 
 public function GenMeshPlane(atom width,atom len,atom x,atom z)
-        return c_func(xGenMeshPlane,{width,len,x,z})
+atom mem=allocate(size_mesh)
+atom ptr= c_func(xGenMeshPlane,{mem,width,len,x,z})
+sequence mesh=peek_mesh(ptr)
+free(mem)
+return mesh
 end function
 
 public function GenMeshCube(atom width,atom height,atom len)
-        return c_func(xGenMeshCube,{width,height,len})
+atom mem=allocate(size_mesh)
+atom ptr= c_func(xGenMeshCube,{mem,width,height,len})
+sequence mesh=peek_mesh(ptr)
+free(mem)
+return mesh
 end function
 
 public function GenMeshSphere(atom rad,atom rings,atom slices)
-        return c_func(xGenMeshSphere,{rad,rings,slices})
+atom mem=allocate(size_mesh)
+atom ptr= c_func(xGenMeshSphere,{mem,rad,rings,slices})
+sequence mesh=peek_mesh(ptr)
+free(mem)
+return mesh
 end function
 
 public function GenMeshHemiSphere(atom rad,atom rings,atom slices)
-        return c_func(xGenMeshHemiSphere,{rad,rings,slices})
+atom mem=allocate(size_mesh)
+atom ptr= c_func(xGenMeshHemiSphere,{mem,rad,rings,slices})
+sequence mesh=peek_mesh(ptr)
+free(mem)
+return mesh
 end function
 
 public function GenMeshCylinder(atom rad,atom height,atom slices)
-        return c_func(xGenMeshCylinder,{rad,height,slices})
+atom mem=allocate(size_mesh)
+atom ptr= c_func(xGenMeshCylinder,{mem,rad,height,slices})
+sequence mesh=peek_mesh(ptr)
+free(mem)
+return mesh
 end function
 
 public function GenMeshCone(atom rad,atom height,atom slices)
-        return c_func(xGenMeshCone,{rad,height,slices})
+atom mem=allocate(size_mesh)
+atom ptr= c_func(xGenMeshCone,{mem,rad,height,slices})
+sequence mesh=peek_mesh(ptr)
+free(mem)
+return mesh
 end function
 
 public function GenMeshTorus(atom rad,atom size,atom seg,atom sides)
-        return c_func(xGenMeshTorus,{rad,size,seg,sides})
+atom mem=allocate(size_mesh)
+atom ptr= c_func(xGenMeshTorus,{mem,rad,size,seg,sides})
+sequence mesh=peek_mesh(ptr)
+free(mem)
+return mesh
 end function
 
 public function GenMeshKnot(atom rad,atom size,atom seg,atom sides)
-        return c_func(xGenMeshKnot,{rad,size,seg,sides})
+atom mem=allocate(size_mesh)
+atom ptr= c_func(xGenMeshKnot,{mem,rad,size,seg,sides})
+sequence mesh=peek_mesh(ptr)
+free(mem)
+return mesh
 end function
 
 public function GenMeshHeightmap(sequence heightmap,sequence size)
-        return c_func(xGenMeshHeightmap,{heightmap,size})
+atom pimg=allocate(size_image)
+atom vec=allocate(size_vector3)
+atom mem=allocate(size_mesh)
+atom result
+        result = c_func(xGenMeshHeightmap,{mem,poke_image(pimg,heightmap),poke_vector3(vec,size)})
+sequence mesh=peek_mesh(result)
+free(pimg)
+free(mem)
+free(vec)
+return mesh
 end function
 
 public function GenMeshCubicmap(sequence cubicmap,sequence size)
-        return c_func(xGenMeshCubicmap,{cubicmap,size})
+atom pimg=allocate(size_image)
+atom vec=allocate(size_vector3)
+atom mem=allocate(size_mesh)
+atom result
+        result= c_func(xGenMeshCubicmap,{mem,poke_image(pimg,cubicmap),poke_vector3(vec,size)})
+sequence mesh=peek_mesh(result)
+free(pimg)
+free(mem)
+free(vec)
+return mesh
 end function
 
 --Material loading functions
-public constant xLoadMaterials = define_c_func(ray,"+LoadMaterials",{C_STRING,C_POINTER},C_POINTER),
+constant xLoadMaterials = define_c_func(ray,"+LoadMaterials",{C_STRING,C_POINTER},C_POINTER),
                                 xLoadMaterialDefault = define_c_func(ray,"+LoadMaterialDefault",{},Material),
                                 xIsMaterialValid = define_c_func(ray,"+IsMaterialValid",{Material},C_BOOL),
                                 xUnloadMaterial = define_c_proc(ray,"+UnloadMaterial",{Material}),
@@ -4488,7 +4734,7 @@ public procedure SetModelMeshMaterial(atom model,atom meshID,atom matID)
 end procedure
 
 --Model animation loading functions
-public constant xLoadModelAnimations = define_c_func(ray,"+LoadModelAnimations",{C_STRING,C_POINTER},C_POINTER),
+constant xLoadModelAnimations = define_c_func(ray,"+LoadModelAnimations",{C_STRING,C_POINTER},C_POINTER),
                                 xUpdateModelAnimation = define_c_proc(ray,"+UpdateModelAnimation",{Model,ModelAnimation,C_INT}),
 --CHECK not in lib???           xUpdateModelAnimationBones = define_c_proc(ray,"+UpdateModelAnimationBones",{Model,ModelAnimation,C_INT}),
 --CHECK not in lib???           xUnloadModelAnimation = define_c_proc(ray,"+UnloadModelAnimation",{ModelAnimation}),
@@ -5285,13 +5531,13 @@ public function Normalize(atom val,atom start,atom xend)
         return c_func(xNormalize,{val,start,xend})
 end function
 
-export constant xRemap = define_c_func(ray,"+Remap",{C_FLOAT,C_FLOAT,C_FLOAT,C_FLOAT,C_FLOAT},C_FLOAT)
+constant xRemap = define_c_func(ray,"+Remap",{C_FLOAT,C_FLOAT,C_FLOAT,C_FLOAT,C_FLOAT},C_FLOAT)
 
 global function Remap(atom val,atom iS,atom iE,atom oS,atom oE)
         return c_func(xRemap,{val,iS,iE,oS,oE})
 end function
 
-export constant xWrap = define_c_func(ray,"+Wrap",{C_FLOAT,C_FLOAT,C_FLOAT},C_FLOAT)
+constant xWrap = define_c_func(ray,"+Wrap",{C_FLOAT,C_FLOAT,C_FLOAT},C_FLOAT)
 
 global function Wrap(atom val,atom min,atom max)
         return c_func(xWrap,{val,min,max})
@@ -5400,11 +5646,36 @@ global enum BORDER_COLOR_NORMAL = 0,
         TEXT_PADDING,
         TEXT_ALIGNMENT
 
+global enum TEXT_SIZE = 16,
+        TEXT_SPACING,
+        LINE_COLOR,
+        BACKGROUND_COLOR,
+        TEXT_LINE_SPACING,
+        TEXT_ALIGNMENT_VERTICAL,
+        TEXT_WRAP_MODE
+
+global enum STATE_NORMAL = 0,
+            STATE_FOCUSED,
+            STATE_PRESSED,
+            STATE_DISABLED
+
+global enum TEXT_READONLY = 16
 
 
 
 constant xGuiEnable = define_c_proc(ray,"+GuiEnable",{}),
-         xGuiDisable = define_c_proc(ray,"+GuiDisable",{})
+         xGuiDisable = define_c_proc(ray,"+GuiDisable",{}),
+         xGuiSetIconScale = define_c_proc(ray,"+GuiSetIconScale",{C_INT}),
+         xGuiSetState = define_c_proc(ray,"+GuiSetState",{C_INT})
+        
+global procedure GuiSetState(atom state)
+        c_proc(xGuiSetState,{state})
+end procedure
+
+global procedure GuiSetIconScale(atom scale)
+        c_proc(xGuiSetIconScale,{scale})
+end procedure
+
 global procedure GuiEnable()
         c_proc(xGuiEnable,{})
 end procedure
@@ -5424,7 +5695,7 @@ public function GuiGetStyle(atom control,atom property)
         return c_func(xGuiGetStyle,{control,property})
 end function
 
-global constant xGuiLabel = define_c_func(ray,"+GuiLabel",{Rectangle,C_STRING},C_INT),
+constant xGuiLabel = define_c_func(ray,"+GuiLabel",{Rectangle,C_STRING},C_INT),
                                 xGuiButton = define_c_func(ray,"+GuiButton",{Rectangle,C_STRING},C_INT),
                                 xGuiLabelButton = define_c_func(ray,"+GuiLabelButton",{Rectangle,C_STRING},C_INT),
                                 xGuiToggle = define_c_func(ray,"+GuiToggle",{Rectangle,C_STRING,C_POINTER},C_INT),
@@ -5540,25 +5811,25 @@ free(memrect)
 return result
 end function
 
-public function GuiTextBox(sequence bounds,sequence text,atom size,atom editMode)
+public function GuiTextBox(sequence bounds,sequence idval,atom size,atom editMode)
 atom memrect=allocate(size_rectangle)
-atom pstr=allocate_string(text)
+atom addr=get_addr_string(idval)
 atom result
-        result = c_func(xGuiTextBox,{poke_rectangle(memrect,bounds),pstr,size,editMode})
-free(pstr)      
+        result = c_func(xGuiTextBox,{poke_rectangle(memrect,bounds),addr,size,editMode})
+        --?result   
 free(memrect)
-return result
+return peek_string(addr)
 end function
 
 
-public constant xGuiWindowBox = define_c_func(ray,"+GuiWindowBox",{Rectangle,C_STRING},C_INT),
+constant xGuiWindowBox = define_c_func(ray,"+GuiWindowBox",{Rectangle,C_STRING},C_INT),
                                 xGuiGroupBox = define_c_func(ray,"+GuiGroupBox",{Rectangle,C_STRING},C_INT),
                                 xGuiLine = define_c_func(ray,"+GuiLine",{Rectangle,C_STRING},C_INT),
                                 xGuiPanel = define_c_func(ray,"+GuiPanel",{Rectangle,C_STRING},C_INT),
                                 xGuiTabBar = define_c_func(ray,"+GuiTabBar",{Rectangle,C_STRING,C_INT,C_POINTER},C_INT),
                                 xGuiScrollPanel = define_c_func(ray,"+GuiScrollPanel",{Rectangle,C_STRING,Rectangle,C_POINTER,C_POINTER},C_INT)
                                 
-public function GuiWindowBox(sequence bounds,sequence title)
+global function GuiWindowBox(sequence bounds,sequence title)
 atom memrect=allocate(size_rectangle)
 atom pstr=allocate_string(title)
 atom result
