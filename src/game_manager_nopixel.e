@@ -30,7 +30,7 @@ enum x=1,y=2
 
 -- Globals
 integer screenWidth = 800
-integer screenHeight = 450
+integer screenHeight = 448
 sequence particles = {}
 integer currentEffect = EFFECT_ATTRACT
 integer currentState = STATE_MENU
@@ -150,6 +150,11 @@ global function UpdateDrawFrame()
     then
         screenWidth = GetScreenWidth()
         screenHeight = GetScreenHeight()
+    UnloadImage(backimage)
+    backimage=GenImageColor(screenWidth,screenHeight,BLACK)
+    backimage=ImageFormat(backimage,PIXELFORMAT_UNCOMPRESSED_R8G8B8A8)
+    UnloadTexture(backtex)
+    backtex=LoadTextureFromImage(backimage)
         needRestart = true
     end if
 
